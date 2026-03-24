@@ -1,0 +1,28 @@
+import type { MetadataRoute } from 'next';
+
+export default function manifest(): MetadataRoute.Manifest {
+  return {
+    name: 'Poker Jake',
+    short_name: 'Poker',
+    description: 'LINE 德州撲克 — 查看手牌與桌況',
+    start_url: '/',
+    display: 'standalone',
+    orientation: 'portrait',
+    background_color: '#122f22',
+    theme_color: '#1a4731',
+    icons: [
+      {
+        src: '/icons/icon-192.png',
+        sizes: '192x192',
+        type: 'image/png',
+        purpose: 'any',
+      },
+      {
+        src: '/icons/icon-512.png',
+        sizes: '512x512',
+        type: 'image/png',
+        purpose: 'maskable',
+      },
+    ],
+  };
+}

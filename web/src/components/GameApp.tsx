@@ -60,7 +60,8 @@ export default function GameApp() {
       await liff.init({ liffId: process.env.NEXT_PUBLIC_LIFF_ID! });
 
       if (!liff.isLoggedIn()) {
-        liff.login();
+        // Preserve current URL (including ?groupId=xxx) through LINE OAuth redirect
+        liff.login({ redirectUri: window.location.href });
         return;
       }
 
@@ -68,8 +69,13 @@ export default function GameApp() {
       setDisplayName(profile.displayName);
       tokenRef.current = liff.getAccessToken();
 
+      // groupId from LIFF context (opened via LIFF link inside LINE)
+      // or from URL param (direct browser access with ?groupId=xxx)
       const ctx = liff.getContext();
-      const groupId = (ctx as { groupId?: string })?.groupId;
+      const groupId =
+        (ctx as { groupId?: string })?.groupId ??
+        new URL(window.location.href).searchParams.get('groupId') ??
+        undefined;
 
       if (!groupId) {
         setStatus('no-group');

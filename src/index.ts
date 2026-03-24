@@ -201,6 +201,13 @@ async function handlePlayerAPI(request: Request, env: Env): Promise<Response> {
   });
 }
 
+// ── LIFF URL builder — embeds groupId so the web app gets it from URL params ──
+
+function buildLiffUrl(base: string, groupId: string): string {
+  // liff.state tells LIFF which path/query to open: /?groupId=Cxxx
+  return `${base}?liff.state=${encodeURIComponent('/?groupId=' + groupId)}`;
+}
+
 // ── Help text ─────────────────────────────────────────────────────────────────
 
 function buildHelpText(liffUrl: string): string {
@@ -248,7 +255,7 @@ const ALIASES: Record<string, string> = {
 // ── Main fetch handler ────────────────────────────────────────────────────────
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const { pathname } = new URL(request.url);
 
     // CORS preflight for LIFF app
@@ -270,7 +277,7 @@ export default {
       return new Response('Method Not Allowed', { status: 405 });
     }
 
-    // LINE webhook
+    // LINE webhook — verify signature synchronously, then process in background
     const body = await request.text();
     const signature = request.headers.get('x-line-signature') ?? '';
 
@@ -285,14 +292,21 @@ export default {
       return new Response('OK');
     }
 
+    // Return 200 OK to LINE immediately, process events in background.
+    // This prevents LINE from timing out and retrying the webhook.
     const payload = JSON.parse(body) as { events: LineEvent[] };
-    for (const evt of payload.events) {
-      try {
-        await handleEvent(evt, env);
-      } catch (e) {
-        console.error('handleEvent error:', e);
-      }
-    }
+    ctx.waitUntil(
+      (async () => {
+        for (const evt of payload.events) {
+          try {
+            await handleEvent(evt, env);
+          } catch (e) {
+            console.error('handleEvent error:', e);
+          }
+        }
+      })()
+    );
+
     return new Response('OK');
   },
 };
@@ -348,7 +362,7 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
   switch (cmd) {
     case '/help':
     case '/h':
-      replyText = buildHelpText(env.LIFF_URL);
+      replyText = buildHelpText(buildLiffUrl(env.LIFF_URL, groupId));
       break;
 
     case '/join':
@@ -365,7 +379,7 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
       result = startGame(state, userId);
       // Append LIFF link to game start message
       if (result.ok) {
-        result = { ...result, groupMsg: result.groupMsg + `\n\n🃏 底牌查看：${env.LIFF_URL}` };
+        result = { ...result, groupMsg: result.groupMsg + `\n\n🃏 底牌查看：${buildLiffUrl(env.LIFF_URL, groupId)}` };
       }
       break;
 
@@ -406,7 +420,7 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
           ...result,
           groupMsg:
             result.groupMsg +
-            `\n\n💸 爆倉玩家請點連結加倉：${env.LIFF_URL}\n指令：/buyin [金額] 或 /leave`,
+            `\n\n💸 爆倉玩家請點連結加倉：${buildLiffUrl(env.LIFF_URL, groupId)}\n指令：/buyin [金額] 或 /leave`,
         };
       }
       break;
@@ -444,7 +458,7 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
 
     // /cards kept as fallback but now just points to the LIFF app
     case '/cards':
-      replyText = `🃏 請點以下連結查看底牌：\n${env.LIFF_URL}`;
+      replyText = `🃏 請點以下連結查看底牌：\n${buildLiffUrl(env.LIFF_URL, groupId)}`;
       break;
 
     case '/balance': {
