@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+:root {
+  --felt: #1a4731;
+  --felt-dark: #122f22;
+  --gold: #f0b429;
+  --chip: #e63946;
+}
+
+body {
+  background-color: var(--felt-dark);
+  color: #f1f5f0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  min-height: 100dvh;
+  overscroll-behavior: none;
+}
