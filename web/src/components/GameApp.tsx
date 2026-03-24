@@ -51,7 +51,15 @@ export default function GameApp() {
 
   useEffect(() => {
     initLiff();
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
+
+    // Refresh immediately when user switches back to this tab/app
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   async function initLiff() {
@@ -85,8 +93,8 @@ export default function GameApp() {
       groupIdRef.current = groupId;
       await refresh();
 
-      // Poll every 4 seconds
-      intervalRef.current = setInterval(refresh, 4000);
+      // Poll every 2 seconds
+      intervalRef.current = setInterval(refresh, 2000);
     } catch (e) {
       console.error(e);
       setErrorMsg(String(e));
@@ -157,11 +165,15 @@ export default function GameApp() {
           <span style={{ background: PHASE_COLORS[phase] ?? '#6b7280', color: '#fff', borderRadius: 12, padding: '2px 10px', fontSize: 12, fontWeight: 600 }}>
             {PHASE_LABELS[phase] ?? phase}  第 {view.handNum} 局
           </span>
-          {lastUpdated && (
-            <span style={{ color: '#6b7280', fontSize: 11 }}>
-              {lastUpdated.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-            </span>
-          )}
+          <span
+            onClick={refresh}
+            style={{ color: '#6b7280', fontSize: 11, cursor: 'pointer', userSelect: 'none' }}
+            title="點擊立即刷新"
+          >
+            {lastUpdated
+              ? `🔄 ${lastUpdated.toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+              : '🔄'}
+          </span>
         </div>
       </div>
 

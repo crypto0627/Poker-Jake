@@ -162,7 +162,8 @@ function makePlayerFromQueue(q: QueueEntry): PlayerState {
     isBB: false,
     hasActed: false,
     wantsToLeave: false,
-    sessionStake: q.sessionStake,
+    // sessionStake=0 means new player who hasn't received chips yet → set now
+    sessionStake: q.sessionStake === 0 ? q.startingChips : q.sessionStake,
     buyInThisSession: q.buyInThisSession,
   };
 }
@@ -309,7 +310,7 @@ function chipsummary(state: GameState): string {
   return ['💰 籌碼：', ...state.players.map((p) => `  ${p.name}: $${p.chips}`)].join('\n');
 }
 
-function finalStandings(state: GameState, settled: SettlementEntry[]): string {
+function finalStandings(_state: GameState, settled: SettlementEntry[]): string {
   const medals = ['🥇', '🥈', '🥉'];
   const lines = settled.sort((a, b) => b.net - a.net).map((s, i) => {
     const sign = s.net >= 0 ? '+' : '';
@@ -335,7 +336,7 @@ export function addPlayer(state: GameState, userId: string, name: string): Actio
       userId,
       name,
       startingChips: STARTING_CHIPS,
-      sessionStake: STARTING_CHIPS,
+      sessionStake: 0,          // not yet received chips; set when hand starts
       buyInThisSession: 1,
     });
     return ok(`⏳ ${name} 加入等待隊列！下一局開始時自動上桌（隊列：${state.queue.length} 人）`);
