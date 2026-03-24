@@ -34,6 +34,7 @@ import {
   startGame,
   nextHand,
   endGame,
+  forceEndGame,
   getStatus,
   processAction,
   buyIn,
@@ -219,8 +220,9 @@ function buildHelpText(liffUrl: string): string {
   /buyin 或  加倉 [金額]  — 爆倉後加倉（預設 $${STARTING_CHIPS}）
 
 【其他】
-  /next    或 下一局 — 下一局
-  /endgame 或 結束   — 結束遊戲（記錄帳戶）
+  /next     或 下一局  — 下一局
+  /endgame  或 結束    — 結束遊戲（記錄帳戶）
+  /forceend 或 強制結束 — 強制結束遊戲（任何狀態皆可）
   /status  或 狀態   — 查看桌況
   /balance 或 帳戶   — 查看個人帳戶
   /rank    或 排行榜  — 本群排行榜
@@ -238,7 +240,7 @@ const ALIASES: Record<string, string> = {
   '加入': '/join', '離開': '/leave', '開始': '/start',
   '跟注': '/call', '過牌': '/check', '棄牌': '/fold',
   '加注': '/raise', '全押': '/allin', '加倉': '/buyin',
-  '下一局': '/next', '結束': '/endgame', '狀態': '/status',
+  '下一局': '/next', '結束': '/endgame', '強制結束': '/forceend', '狀態': '/status',
   '手牌': '/cards', '帳戶': '/balance', '我的帳戶': '/balance',
   '排行榜': '/rank', '幫助': '/help',
 };
@@ -408,6 +410,19 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
         };
       }
       break;
+
+    case '/forceend': {
+      result = forceEndGame(state);
+      if (result.settlements?.length) {
+        for (const s of result.settlements) {
+          await applySettlement(env.GAMES_KV, s);
+          await registerGroupMember(env.GAMES_KV, groupId, s.userId);
+        }
+      }
+      await env.GAMES_KV.delete(groupId);
+      await sendResult(token, replyToken, result);
+      return;
+    }
 
     case '/endgame': {
       result = endGame(state, userId);

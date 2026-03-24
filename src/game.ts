@@ -411,8 +411,20 @@ export function nextHand(state: GameState, _userId: string): ActionResult {
   return startNewHand(state);
 }
 
+export function forceEndGame(state: GameState): ActionResult {
+  if (state.phase === 'waiting') {
+    state.phase = 'ended';
+    return ok('🛑 遊戲已強制重置。', {});
+  }
+  return _doEndGame(state);
+}
+
 export function endGame(state: GameState, _userId: string): ActionResult {
   if (state.phase === 'waiting') return fail('遊戲還沒開始！');
+  return _doEndGame(state);
+}
+
+function _doEndGame(state: GameState): ActionResult {
 
   // Collect settlements for all active players
   const settlements: SettlementEntry[] = [
