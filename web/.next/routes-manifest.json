@@ -12,18 +12,7 @@
       "regex": "^(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))/$"
     }
   ],
-  "headers": [
-    {
-      "source": "/(.*)",
-      "headers": [
-        {
-          "key": "X-Frame-Options",
-          "value": "ALLOWALL"
-        }
-      ],
-      "regex": "^(?:/(.*))(?:/)?$"
-    }
-  ],
+  "headers": [],
   "dynamicRoutes": [],
   "staticRoutes": [
     {

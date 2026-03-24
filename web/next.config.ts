@@ -10,15 +10,9 @@ const withPWA = withPWAInit({
 });
 
 const nextConfig: NextConfig = withPWA({
-  // Required for LIFF: allow embedding in LINE's WebView
-  async headers() {
-    return [
-      {
-        source: '/(.*)',
-        headers: [{ key: 'X-Frame-Options', value: 'ALLOWALL' }],
-      },
-    ];
-  },
+  output: 'export',   // static export for Cloudflare Pages
+  // Note: headers() is not supported with output:'export'
+  // X-Frame-Options is set via public/_headers (Cloudflare Pages)
 });
 
 export default nextConfig;
