@@ -453,9 +453,23 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
       return;
     }
 
-    case '/status':
-      replyText = getStatus(state);
+    case '/status': {
+      const statusText = getStatus(state);
+      const activePh = state.phase !== 'waiting' && state.phase !== 'ended' && state.phase !== 'showdown';
+      const cur = activePh ? state.players[state.currentIdx] : null;
+      if (cur && !cur.folded && !cur.allIn) {
+        result = {
+          ok: true,
+          groupMsg: `${statusText}\n👉 @${cur.name} 輪到你行動！`,
+          privateMessages: {},
+          mentionUserId: cur.userId,
+          mentionName: cur.name,
+        };
+      } else {
+        replyText = statusText;
+      }
       break;
+    }
 
     case '/link':
     // /cards kept as fallback but now just points to the LIFF app

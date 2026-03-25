@@ -47,19 +47,15 @@ export default function GameApp() {
 
   const groupIdRef = useRef<string | null>(null);
   const tokenRef = useRef<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     initLiff();
 
-    // Refresh immediately when user switches back to this tab/app
+    // Refresh when user switches back to this tab/app (e.g. from LINE chat)
     const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
     document.addEventListener('visibilitychange', onVisible);
 
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      document.removeEventListener('visibilitychange', onVisible);
-    };
+    return () => { document.removeEventListener('visibilitychange', onVisible); };
   }, []);
 
   async function initLiff() {
@@ -93,8 +89,6 @@ export default function GameApp() {
       groupIdRef.current = groupId;
       await refresh();
 
-      // Poll every 2 seconds
-      intervalRef.current = setInterval(refresh, 2000);
     } catch (e) {
       console.error(e);
       setErrorMsg(String(e));
