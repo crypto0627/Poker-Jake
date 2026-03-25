@@ -2,9 +2,90 @@
 
 const LINE_API = 'https://api.line.me/v2/bot';
 
+// ── buildMentionMessage ───────────────────────────────────────────────────────
+
+export interface MentionInput {
+  name: string;
+  userId: string;
+}
+
+interface Mentionee {
+  type: 'user';
+  index: number;   // zero-based char index of '@' in text
+  length: number;  // length of '@name'
+  userId: string;
+}
+
 export interface LineTextMessage {
   type: 'text';
   text: string;
+  mention?: {
+    mentionees: Mentionee[];
+  };
+}
+
+/**
+ * Builds a LINE Messaging API text message with user @mentions.
+ *
+ * - Supports multiple mentions and duplicate names (matched in text order).
+ * - Throws if a listed name is not found in the text.
+ *
+ * @example
+ * buildMentionMessage({
+ *   text: '👉 @Jake Kuo 輪到你行動！',
+ *   mentions: [{ name: 'Jake Kuo', userId: 'U123abc' }],
+ * });
+ * // {
+ * //   type: 'text',
+ * //   text: '👉 @Jake Kuo 輪到你行動！',
+ * //   mention: { mentionees: [{ type:'user', index:3, length:9, userId:'U123abc' }] }
+ * // }
+ */
+export function buildMentionMessage({
+  text,
+  mentions,
+}: {
+  text: string;
+  mentions: MentionInput[];
+}): LineTextMessage {
+  if (mentions.length === 0) return { type: 'text', text };
+
+  // Group by name to handle duplicates: each entry corresponds to an occurrence in text order
+  const byName = new Map<string, MentionInput[]>();
+  for (const m of mentions) {
+    const list = byName.get(m.name) ?? [];
+    list.push(m);
+    byName.set(m.name, list);
+  }
+
+  const mentionees: Mentionee[] = [];
+
+  for (const [name, entries] of byName) {
+    const pattern = `@${name}`;
+    let searchFrom = 0;
+
+    for (const entry of entries) {
+      const idx = text.indexOf(pattern, searchFrom);
+      if (idx === -1) {
+        throw new Error(
+          `buildMentionMessage: "@${name}" not found in text` +
+          (searchFrom > 0 ? ` after position ${searchFrom}` : '')
+        );
+      }
+      mentionees.push({
+        type: 'user',
+        index: idx,
+        length: pattern.length,
+        userId: entry.userId,
+      });
+      searchFrom = idx + pattern.length;
+    }
+  }
+
+  // LINE requires mentionees sorted by index ascending
+  mentionees.sort((a, b) => a.index - b.index);
+
+  return { type: 'text', text, mention: { mentionees } };
 }
 
 export async function replyMessage(
@@ -39,36 +120,17 @@ export async function replyWithMention(
   mentionUserId: string,
   mentionName: string
 ): Promise<void> {
-  // Append "@name" at the end of the text — mentionees index points to the @ char
-  const mentionStr = `@${mentionName}`;
-  // Find the last occurrence in the text (we add it at the end)
-  const fullText = text;
-  const atIndex = [...fullText].reduce((acc, _, i) => {
-    // Find last index of the mentionStr in fullText
-    if (fullText.slice(i, i + mentionStr.length) === mentionStr) return i;
-    return acc;
-  }, -1);
-
-  const body: Record<string, unknown> = {
-    replyToken,
-    messages: [
-      {
-        type: 'text',
-        text: fullText,
-        ...(atIndex >= 0
-          ? {
-              mentionees: [
-                {
-                  index: atIndex,
-                  length: mentionStr.length,
-                  userId: mentionUserId,
-                },
-              ],
-            }
-          : {}),
-      },
-    ],
-  };
+  let message: LineTextMessage;
+  try {
+    message = buildMentionMessage({
+      text,
+      mentions: [{ name: mentionName, userId: mentionUserId }],
+    });
+  } catch {
+    // @name not found in text — fall back to plain reply
+    await replyMessage(token, replyToken, text);
+    return;
+  }
 
   const res = await fetch(`${LINE_API}/message/reply`, {
     method: 'POST',
@@ -76,12 +138,11 @@ export async function replyWithMention(
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ replyToken, messages: [message] }),
   });
   if (!res.ok) {
     console.error('replyWithMention failed:', res.status, await res.text());
-    // Fallback: plain text reply
-    await replyMessage(token, replyToken, fullText);
+    await replyMessage(token, replyToken, text);
   }
 }
 

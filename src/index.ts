@@ -233,6 +233,7 @@ function buildHelpText(liffUrl: string): string {
   /status  或 狀態   — 查看桌況
   /balance 或 帳戶   — 查看個人帳戶
   /rank    或 排行榜  — 本群排行榜
+  /link    或 連結   — 重新發送查看連結
   /help    或 幫助   — 此說明
 
 🃏 底牌請點以下連結查看：
@@ -247,7 +248,7 @@ const ALIASES: Record<string, string> = {
   '加入': '/join', '離開': '/leave', '開始': '/start',
   '跟注': '/call', '過牌': '/check', '棄牌': '/fold',
   '加注': '/raise', '全押': '/allin', '加倉': '/buyin',
-  '下一局': '/next', '結束': '/endgame', '強制結束': '/forceend', '狀態': '/status',
+  '下一局': '/next', '結束': '/endgame', '強制結束': '/forceend', '狀態': '/status', '連結': '/link',
   '手牌': '/cards', '帳戶': '/balance', '我的帳戶': '/balance',
   '排行榜': '/rank', '幫助': '/help',
 };
@@ -456,6 +457,7 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
       replyText = getStatus(state);
       break;
 
+    case '/link':
     // /cards kept as fallback but now just points to the LIFF app
     case '/cards':
       replyText = `🃏 請點以下連結查看底牌：\n${buildLiffUrl(env.LIFF_URL, groupId)}`;

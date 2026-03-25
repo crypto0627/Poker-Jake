@@ -503,7 +503,7 @@ section('9. endGame settlement: net values');
   const carolSettlement = endR3.settlements?.find(s => s.userId === 'u3');
   assert(carolSettlement !== undefined, 'Carol has settlement entry even though in queue');
   assert(carolSettlement!.finalChips === 0, 'Carol finalChips = 0 (never got chips)');
-  assert(carolSettlement!.net === -STARTING_CHIPS, `Carol net = -${STARTING_CHIPS} (staked but never played), got ${carolSettlement!.net}`);
+  assert(carolSettlement!.net === 0, `Carol net = 0 (in queue, never received chips), got ${carolSettlement!.net}`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
