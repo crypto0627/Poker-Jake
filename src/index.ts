@@ -70,6 +70,8 @@ async function loadGame(kv: KVNamespace, groupId: string): Promise<GameState> {
   raw.pendingBuyIn ??= [];
   for (const p of raw.players ?? []) {
     p.wantsToLeave     ??= false;
+    p.position         ??= '';
+    p.pendingTopUp     ??= 0;
     p.sessionStake     ??= p.chips;
     p.buyInThisSession ??= 1;
   }
@@ -149,6 +151,7 @@ async function handlePlayerAPI(request: Request, env: Env): Promise<Response> {
       isDealer: p.isDealer,
       isSB: p.isSB,
       isBB: p.isBB,
+      position: p.position,
       isMe: p.userId === userId,
       isCurrentTurn: i === state.currentIdx && !p.folded && !p.allIn,
     })),
@@ -224,7 +227,7 @@ function buildHelpText(liffUrl: string): string {
   /fold  或  棄牌        — 棄牌
   /raise 或  加注 <金額>  — 加注（例: /raise 100）
   /allin 或  全押        — 全押
-  /buyin 或  加倉 [金額]  — 爆倉後加倉（預設 $${STARTING_CHIPS}）
+  /buyin 或  加倉 [金額]  — 加倉（上限 $${STARTING_CHIPS}，下一局生效）
 
 【其他】
   /next     或 下一局  — 下一局
@@ -460,7 +463,7 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
       if (cur && !cur.folded && !cur.allIn) {
         result = {
           ok: true,
-          groupMsg: `${statusText}\n👉 @${cur.name} 輪到你行動！`,
+          groupMsg: `@${cur.name} 輪到你行動！\n\n${statusText}`,
           privateMessages: {},
           mentionUserId: cur.userId,
           mentionName: cur.name,

@@ -110,8 +110,12 @@ export async function replyMessage(
 }
 
 /**
- * Reply with a mention (@name) appended.
- * LINE mention format: include mentionees[] with character index in text.
+ * Reply with a real @mention using LINE Text Message v2 (released 2024-10-30).
+ *
+ * textV2 uses {placeholder} substitution — no index/length calculation needed.
+ * The caller passes the plain display text (may include "@name" for readability);
+ * replyWithMention will replace the first occurrence of "@{mentionName}" with a
+ * {m0} placeholder, or prepend "{m0} " if @name is absent.
  */
 export async function replyWithMention(
   token: string,
@@ -120,17 +124,23 @@ export async function replyWithMention(
   mentionUserId: string,
   mentionName: string
 ): Promise<void> {
-  let message: LineTextMessage;
-  try {
-    message = buildMentionMessage({
-      text,
-      mentions: [{ name: mentionName, userId: mentionUserId }],
-    });
-  } catch {
-    // @name not found in text — fall back to plain reply
-    await replyMessage(token, replyToken, text);
-    return;
-  }
+  // Replace "@name" in text with {m0} placeholder for textV2 substitution.
+  // If not found, prepend the mention so it always appears.
+  const pattern = `@${mentionName}`;
+  const bodyText = text.includes(pattern)
+    ? text.replace(pattern, '{m0}')
+    : `{m0} ${text}`;
+
+  const message = {
+    type: 'textV2',
+    text: bodyText,
+    substitution: {
+      m0: {
+        type: 'mention',
+        mentionee: { type: 'user', userId: mentionUserId },
+      },
+    },
+  };
 
   const res = await fetch(`${LINE_API}/message/reply`, {
     method: 'POST',
@@ -142,6 +152,7 @@ export async function replyWithMention(
   });
   if (!res.ok) {
     console.error('replyWithMention failed:', res.status, await res.text());
+    // Fall back to plain text
     await replyMessage(token, replyToken, text);
   }
 }

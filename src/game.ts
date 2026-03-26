@@ -37,6 +37,8 @@ export interface PlayerState {
   isBB: boolean;
   hasActed: boolean;
   wantsToLeave: boolean;
+  position: string;          // seat position label e.g. 'BTN', 'UTG', 'CO' (set each hand)
+  pendingTopUp: number;      // chips queued to add at start of next hand (0 = none)
   sessionStake: number;      // total chips bought in for this game session
   buyInThisSession: number;  // buy-in transactions this session (1 = initial join)
 }
@@ -142,6 +144,8 @@ function makePlayer(userId: string, name: string): PlayerState {
     isBB: false,
     hasActed: false,
     wantsToLeave: false,
+    position: '',
+    pendingTopUp: 0,
     sessionStake: STARTING_CHIPS,
     buyInThisSession: 1,
   };
@@ -162,6 +166,8 @@ function makePlayerFromQueue(q: QueueEntry): PlayerState {
     isBB: false,
     hasActed: false,
     wantsToLeave: false,
+    position: '',
+    pendingTopUp: 0,
     // sessionStake=0 means new player who hasn't received chips yet → set now
     sessionStake: q.sessionStake === 0 ? q.startingChips : q.sessionStake,
     buyInThisSession: q.buyInThisSession,
@@ -205,7 +211,36 @@ function resetForHand(p: PlayerState): void {
   p.isSB = false;
   p.isBB = false;
   p.hasActed = false;
+  p.position = '';
   // wantsToLeave / sessionStake / buyInThisSession intentionally preserved
+}
+
+// Position labels for each seat count (seats between BB+1 and CO inclusive)
+const MID_POSITIONS: Record<number, string[]> = {
+  0: [],                                         // 3 players: BTN SB BB
+  1: ['UTG'],                                    // 4 players
+  2: ['UTG', 'CO'],                              // 5 players
+  3: ['UTG', 'HJ', 'CO'],                        // 6-Max
+  4: ['UTG', 'UTG+1', 'HJ', 'CO'],              // 7 players
+  5: ['UTG', 'UTG+1', 'LJ', 'HJ', 'CO'],        // 8 players
+  6: ['UTG', 'UTG+1', 'MP', 'LJ', 'HJ', 'CO'], // 9-Max (Full-Ring)
+};
+
+function assignPositions(state: GameState): void {
+  const n = state.players.length;
+  const d = state.dealerIdx % n;
+  if (n === 2) {
+    state.players[d].position = 'BTN/SB';
+    state.players[(d + 1) % n].position = 'BB';
+    return;
+  }
+  state.players[d].position = 'BTN';
+  state.players[(d + 1) % n].position = 'SB';
+  state.players[(d + 2) % n].position = 'BB';
+  const mid = MID_POSITIONS[n - 3] ?? [];
+  for (let i = 0; i < mid.length; i++) {
+    state.players[(d + 3 + i) % n].position = mid[i];
+  }
 }
 
 function resetForRound(state: GameState): void {
@@ -289,7 +324,8 @@ function tableStatus(state: GameState): string {
       s = `💰 $${p.chips}${bet}`;
     }
     const marker = i === state.currentIdx && !p.folded && !p.allIn ? '▶ ' : '   ';
-    return `${marker}${p.name}: ${s}`;
+    const pos = p.position ? `[${p.position}] ` : '';
+    return `${marker}${pos}${p.name}: ${s}`;
   });
 
   const queueStr =
@@ -408,6 +444,11 @@ export function startGame(state: GameState, _userId: string): ActionResult {
 }
 
 export function nextHand(state: GameState, _userId: string): ActionResult {
+  if (state.phase === 'waiting') {
+    if (state.players.length < 2) return fail('至少需要 2 人才能開始！');
+    state.dealerIdx = 0;
+    return startNewHand(state);
+  }
   if (state.phase !== 'showdown') return fail('本局尚未結束！');
   return startNewHand(state);
 }
@@ -464,26 +505,50 @@ function _doEndGame(state: GameState): ActionResult {
 export function buyIn(state: GameState, userId: string, amount: number): ActionResult {
   if (amount <= 0) return fail('加倉金額必須大於 0！');
 
+  // ── Case 1: busted player waiting for re-buy ──────────────────────────────
   const pbIdx = state.pendingBuyIn.findIndex((p) => p.userId === userId);
-  if (pbIdx === -1) {
-    return fail('你目前不需要加倉！（只有爆倉的玩家才能使用此指令）');
+  if (pbIdx !== -1) {
+    const [pb] = state.pendingBuyIn.splice(pbIdx, 1);
+    const capped = Math.min(amount, STARTING_CHIPS);
+    state.queue.push({
+      userId: pb.userId, name: pb.name,
+      startingChips: capped,
+      sessionStake: pb.sessionStake + capped,
+      buyInThisSession: pb.buyInThisSession + 1,
+    });
+    return ok(
+      `💰 ${pb.name} 加倉 $${capped}！下一局開始時上桌。\n` +
+      `（本局總投入：$${pb.sessionStake + capped}，加倉 ${pb.buyInThisSession} 次）`
+    );
   }
 
-  const [pb] = state.pendingBuyIn.splice(pbIdx, 1);
+  // ── Case 2: active player in current hand ─────────────────────────────────
+  const player = findPlayer(state, userId);
+  if (player) {
+    const already = player.pendingTopUp;
+    const maxTopUp = STARTING_CHIPS - player.chips - already;
+    if (maxTopUp <= 0) return fail(`你的籌碼（含預約）已達上限 $${STARTING_CHIPS}，無法再加倉！`);
+    const capped = Math.min(amount, maxTopUp);
+    player.pendingTopUp += capped;
+    return ok(
+      `💰 ${player.name} 預約加倉 $${capped}，下一局開始時生效！\n` +
+      `（目前 $${player.chips}，下一局將有 $${player.chips + player.pendingTopUp}）`
+    );
+  }
 
-  // Add to queue for next hand with updated stake
-  state.queue.push({
-    userId: pb.userId,
-    name: pb.name,
-    startingChips: amount,
-    sessionStake: pb.sessionStake + amount,
-    buyInThisSession: pb.buyInThisSession + 1,
-  });
+  // ── Case 3: player in queue ────────────────────────────────────────────────
+  const q = state.queue.find((e) => e.userId === userId);
+  if (q) {
+    const maxAdd = STARTING_CHIPS - q.startingChips;
+    if (maxAdd <= 0) return fail(`你的籌碼已達上限 $${STARTING_CHIPS}，無法再加倉！`);
+    const capped = Math.min(amount, maxAdd);
+    q.startingChips += capped;
+    q.sessionStake += capped;
+    q.buyInThisSession++;
+    return ok(`💰 ${q.name} 加倉 $${capped}，上桌時將有 $${q.startingChips}！`);
+  }
 
-  return ok(
-    `💰 ${pb.name} 加倉 $${amount}！下一局開始時上桌。\n` +
-    `（本局總投入：$${pb.sessionStake + amount}，加倉 ${pb.buyInThisSession} 次）`
-  );
+  return fail('你不在牌桌或等待區！');
 }
 
 export function getStatus(state: GameState): string {
@@ -650,7 +715,17 @@ function startNewHand(state: GameState): ActionResult {
     });
   }
 
-  // ── 5. Deal new hand ──────────────────────────────────────────────────────
+  // ── 5. Apply pending top-ups ──────────────────────────────────────────────
+  for (const p of state.players) {
+    if (p.pendingTopUp > 0) {
+      p.chips += p.pendingTopUp;
+      p.sessionStake += p.pendingTopUp;
+      p.buyInThisSession++;
+      p.pendingTopUp = 0;
+    }
+  }
+
+  // ── 6. Deal new hand ──────────────────────────────────────────────────────
   state.players.forEach(resetForHand);
   state.deck = makeDeck();
   state.community = [];
@@ -665,6 +740,7 @@ function startNewHand(state: GameState): ActionResult {
   state.players[dealerIdx].isDealer = true;
   state.players[sbIdx].isSB = true;
   state.players[bbIdx].isBB = true;
+  assignPositions(state);
 
   const sbP = state.players[sbIdx];
   const bbP = state.players[bbIdx];
@@ -761,7 +837,7 @@ function advancePhase(state: GameState, prevMsg: string): ActionResult {
 
   const communityStr = state.community.map((c) => c.label).join('  ');
 
-  if (!playersWhoCanAct(state).length) {
+  if (playersWhoCanAct(state).length <= 1) {
     while (state.community.length < 5) state.community.push(dealCard(state));
     return showdown(state, `${prevMsg}\n🎴 ${phaseLabel}：${communityStr}（自動發完剩餘公共牌）`);
   }

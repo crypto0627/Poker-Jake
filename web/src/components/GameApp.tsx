@@ -255,9 +255,7 @@ export default function GameApp() {
         )}
         {view.players.map((p, i) => {
           const tags: string[] = [];
-          if (p.isDealer) tags.push('D');
-          if (p.isSB) tags.push('SB');
-          if (p.isBB) tags.push('BB');
+          if (p.position) tags.push(p.position);
           if (p.allIn) tags.push('All-In');
 
           return (
@@ -273,7 +271,7 @@ export default function GameApp() {
                   {p.name}{p.isMe ? ' (我)' : ''}
                 </span>
                 {tags.map(t => (
-                  <span key={t} style={{ background: t === 'D' ? '#374151' : t === 'All-In' ? '#7c3aed' : '#1d4ed8', color: '#fff', borderRadius: 6, padding: '1px 5px', fontSize: 11 }}>{t}</span>
+                  <span key={t} style={{ background: t === 'All-In' ? '#7c3aed' : t === 'BB' ? '#1d4ed8' : t === 'SB' || t === 'BTN/SB' ? '#065f46' : '#374151', color: '#fff', borderRadius: 6, padding: '1px 5px', fontSize: 11 }}>{t}</span>
                 ))}
                 {p.folded && <span style={{ color: '#ef4444', fontSize: 12 }}>棄牌</span>}
               </div>

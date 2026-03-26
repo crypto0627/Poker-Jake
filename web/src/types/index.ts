@@ -8,6 +8,7 @@ export interface PlayerSummary {
   isDealer: boolean;
   isSB: boolean;
   isBB: boolean;
+  position: string;
   isMe: boolean;
   isCurrentTurn: boolean;
 }
