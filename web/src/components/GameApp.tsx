@@ -16,10 +16,13 @@ function Card({ label, hidden }: { label?: string; hidden?: boolean }) {
       </div>
     );
   }
-  const isRed = label.includes('♥️') || label.includes('♦️');
+  const suitColor = label.includes('♥') ? '#f87171'
+    : label.includes('♦') ? '#60a5fa'
+    : label.includes('♣') ? '#4ade80'
+    : '#111';
   return (
     <div style={{ background: '#fff', width: 48, height: 72, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.4)', flexShrink: 0 }}>
-      <span style={{ fontSize: 18, fontWeight: 700, color: isRed ? '#dc2626' : '#111', lineHeight: 1 }}>{label}</span>
+      <span style={{ fontSize: 18, fontWeight: 700, color: suitColor, lineHeight: 1 }}>{label}</span>
     </div>
   );
 }
