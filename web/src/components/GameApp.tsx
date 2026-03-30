@@ -44,6 +44,8 @@ export default function GameApp() {
   const [view, setView] = useState<PlayerView | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [displayName, setDisplayName] = useState('');
+  const [debugLog, setDebugLog] = useState<string[]>([]);
+  const [showDebug, setShowDebug] = useState(false);
 
   const groupIdRef = useRef<string | null>(null);
   const tokenRef = useRef<string | null>(null);
@@ -58,13 +60,19 @@ export default function GameApp() {
     return () => { document.removeEventListener('visibilitychange', onVisible); };
   }, []);
 
+  function dbg(msg: string) {
+    setDebugLog(prev => [`${new Date().toISOString().slice(11, 19)} ${msg}`, ...prev].slice(0, 20));
+  }
+
   async function initLiff() {
     try {
       const liff = (await import('@line/liff')).default as typeof Liff;
+      dbg(`liff.init liffId=${process.env.NEXT_PUBLIC_LIFF_ID}`);
       await liff.init({ liffId: process.env.NEXT_PUBLIC_LIFF_ID! });
+      dbg(`isLoggedIn=${liff.isLoggedIn()} isInClient=${liff.isInClient()}`);
 
       if (!liff.isLoggedIn()) {
-        // Preserve current URL (including ?groupId=xxx) through LINE OAuth redirect
+        dbg('not logged in → liff.login()');
         liff.login({ redirectUri: window.location.href });
         return;
       }
@@ -72,14 +80,13 @@ export default function GameApp() {
       const profile = await liff.getProfile();
       setDisplayName(profile.displayName);
       tokenRef.current = liff.getAccessToken();
+      dbg(`profile=${profile.displayName} token=${tokenRef.current ? 'ok' : 'null'}`);
 
-      // groupId from LIFF context (opened via LIFF link inside LINE)
-      // or from URL param (direct browser access with ?groupId=xxx)
       const ctx = liff.getContext();
-      const groupId =
-        (ctx as { groupId?: string })?.groupId ??
-        new URL(window.location.href).searchParams.get('groupId') ??
-        undefined;
+      const ctxGroupId = (ctx as { groupId?: string })?.groupId;
+      const urlGroupId = new URL(window.location.href).searchParams.get('groupId');
+      const groupId = ctxGroupId ?? urlGroupId ?? undefined;
+      dbg(`ctx.type=${(ctx as {type?:string})?.type} ctx.groupId=${ctxGroupId} url.groupId=${urlGroupId}`);
 
       if (!groupId) {
         setStatus('no-group');
@@ -91,6 +98,7 @@ export default function GameApp() {
 
     } catch (e) {
       console.error(e);
+      dbg(`initLiff error: ${e}`);
       setErrorMsg(String(e));
       setStatus('error');
     }
@@ -98,17 +106,20 @@ export default function GameApp() {
 
   async function refresh() {
     if (!groupIdRef.current || !tokenRef.current) {
+      dbg(`refresh blocked: groupId=${groupIdRef.current ?? 'null'} token=${tokenRef.current ? 'ok' : 'null'}`);
       setErrorMsg(`groupId=${groupIdRef.current ?? 'null'} token=${tokenRef.current ? 'ok' : 'null'}`);
       setStatus('error');
       return;
     }
     try {
       const data = await fetchPlayerView(groupIdRef.current, tokenRef.current);
+      dbg(`fetch ok phase=${data.phase}`);
       setView(data);
       setLastUpdated(new Date());
       setStatus('ok');
     } catch (e) {
       console.error('refresh error', e);
+      dbg(`fetch error: ${e}`);
       setErrorMsg(String(e));
       setStatus('error');
     }
@@ -141,6 +152,9 @@ export default function GameApp() {
       <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <h2 style={{ color: '#ef4444', fontWeight: 700 }}>錯誤</h2>
         <p style={{ color: '#9ca3af', fontSize: 13 }}>{errorMsg}</p>
+        <pre style={{ fontSize: 10, color: '#6b7280', background: 'rgba(0,0,0,0.3)', borderRadius: 8, padding: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+          {debugLog.join('\n') || '(no logs)'}
+        </pre>
       </div>
     );
   }
@@ -333,6 +347,21 @@ export default function GameApp() {
       >
         🔄 手動刷新
       </button>
+
+      {/* Debug panel */}
+      <div>
+        <button
+          onClick={() => setShowDebug(v => !v)}
+          style={{ background: 'none', border: 'none', color: '#374151', fontSize: 11, cursor: 'pointer', padding: '4px 0' }}
+        >
+          {showDebug ? '▲ debug' : '▼ debug'}
+        </button>
+        {showDebug && (
+          <pre style={{ fontSize: 10, color: '#6b7280', background: 'rgba(0,0,0,0.3)', borderRadius: 8, padding: 8, overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+            {debugLog.join('\n') || '(no logs)'}
+          </pre>
+        )}
+      </div>
     </div>
   );
 }
