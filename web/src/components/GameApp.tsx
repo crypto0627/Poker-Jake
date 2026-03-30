@@ -47,12 +47,26 @@ export default function GameApp() {
 
   const groupIdRef = useRef<string | null>(null);
   const tokenRef = useRef<string | null>(null);
+  const handNumRef = useRef<number>(-1);
 
   useEffect(() => {
     initLiff();
 
-    // Refresh when user switches back to this tab/app (e.g. from LINE chat)
-    const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+    // On visibility restore, refresh immediately then retry a few times to handle
+    // Cloudflare KV eventual-consistency delay (cross-region replication can take seconds).
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      const snapHand = handNumRef.current;
+      refresh();
+      let attempts = 0;
+      const retry = setInterval(async () => {
+        if (handNumRef.current !== snapHand || ++attempts >= 4) {
+          clearInterval(retry);
+          return;
+        }
+        await refresh();
+      }, 1500);
+    };
     document.addEventListener('visibilitychange', onVisible);
 
     return () => { document.removeEventListener('visibilitychange', onVisible); };
@@ -101,6 +115,7 @@ export default function GameApp() {
       setView(data);
       setLastUpdated(new Date());
       setStatus('ok');
+      handNumRef.current = data.handNum;
     } catch (e) {
       console.error('refresh error', e);
       setErrorMsg(String(e));
