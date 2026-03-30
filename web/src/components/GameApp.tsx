@@ -85,7 +85,9 @@ export default function GameApp() {
       const ctx = liff.getContext();
       const ctxGroupId = (ctx as { groupId?: string })?.groupId;
       const urlGroupId = new URL(window.location.href).searchParams.get('groupId');
-      const groupId = ctxGroupId ?? urlGroupId ?? undefined;
+      // Prefer URL param: the bot encodes the real LINE group ID (C-prefix) there.
+      // ctx.groupId can return a UUID in some LIFF environments which won't match KV keys.
+      const groupId = urlGroupId ?? ctxGroupId ?? undefined;
       dbg(`ctx.type=${(ctx as {type?:string})?.type} ctx.groupId=${ctxGroupId} url.groupId=${urlGroupId}`);
 
       if (!groupId) {
