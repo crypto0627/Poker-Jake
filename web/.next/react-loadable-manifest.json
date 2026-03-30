@@ -2,7 +2,7 @@
   "app/page.tsx -> @/components/GameApp": {
     "id": 12,
     "files": [
-      "static/chunks/12.1abe88627e567f55.js"
+      "static/chunks/12.cde482b75b1ded5f.js"
     ]
   },
   "components/GameApp.tsx -> @line/liff": {

@@ -617,11 +617,11 @@ export function processAction(
     }
 
     case 'raise': {
-      const minRaise = toCall + BIG_BLIND;
-      if (amount < minRaise && amount < player.chips) {
-        return fail(`最少需加注 $${minRaise}（跟注 $${toCall} + 最小加注 $${BIG_BLIND}）`);
+      // amount = chips to add ON TOP of state.currentBet (e.g. /raise 30 when BB=20 → total 50)
+      if (amount < BIG_BLIND && player.chips > state.currentBet + amount - player.currentBet) {
+        return fail(`最少需加注 $${BIG_BLIND}`);
       }
-      const additional = Math.min(amount, player.chips + player.currentBet) - player.currentBet;
+      const additional = Math.min(state.currentBet + amount - player.currentBet, player.chips);
       if (additional <= 0) return fail('加注金額不足！');
       const actual = playerBet(player, additional);
       state.pot += actual;
