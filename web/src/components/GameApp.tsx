@@ -97,7 +97,11 @@ export default function GameApp() {
   }
 
   async function refresh() {
-    if (!groupIdRef.current || !tokenRef.current) return;
+    if (!groupIdRef.current || !tokenRef.current) {
+      setErrorMsg(`groupId=${groupIdRef.current ?? 'null'} token=${tokenRef.current ? 'ok' : 'null'}`);
+      setStatus('error');
+      return;
+    }
     try {
       const data = await fetchPlayerView(groupIdRef.current, tokenRef.current);
       setView(data);
@@ -105,6 +109,8 @@ export default function GameApp() {
       setStatus('ok');
     } catch (e) {
       console.error('refresh error', e);
+      setErrorMsg(String(e));
+      setStatus('error');
     }
   }
 

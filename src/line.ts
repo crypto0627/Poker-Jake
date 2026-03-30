@@ -157,27 +157,6 @@ export async function replyWithMention(
   }
 }
 
-export async function pushMessage(
-  token: string,
-  to: string,
-  text: string
-): Promise<void> {
-  try {
-    await fetch(`${LINE_API}/message/push`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        to,
-        messages: [{ type: 'text', text }],
-      }),
-    });
-  } catch {
-    // Best-effort; user may not have added the bot as friend
-  }
-}
 
 export async function getGroupMemberProfile(
   token: string,

@@ -358,7 +358,12 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
 
   const token = env.LINE_CHANNEL_ACCESS_TOKEN;
   const state = await loadGame(env.GAMES_KV, groupId);
-  const displayName = await getGroupMemberProfile(token, groupId, userId);
+  // Use cached name from state to avoid an extra LINE API call on every command
+  const knownPlayer =
+    state.players.find(p => p.userId === userId) ??
+    state.pendingBuyIn.find(p => p.userId === userId) ??
+    state.queue.find(q => q.userId === userId);
+  const displayName = knownPlayer?.name ?? await getGroupMemberProfile(token, groupId, userId);
 
   let result: ActionResult | null = null;
   let replyText = '';
