@@ -24,6 +24,7 @@ import {
   replyMessage,
   replyWithMention,
   getGroupMemberProfile,
+  QuickReplyItem,
 } from './line';
 
 import {
@@ -40,6 +41,8 @@ import {
   buyIn,
   ActionResult,
   STARTING_CHIPS,
+  BIG_BLIND,
+  SMALL_BLIND,
 } from './game';
 
 import {
@@ -242,7 +245,7 @@ function buildHelpText(liffUrl: string): string {
 🃏 底牌請點以下連結查看：
 ${liffUrl}
 
-起始籌碼：$${STARTING_CHIPS}  |  盲注：$10 / $20`;
+起始籌碼：$${STARTING_CHIPS}  |  盲注：$${SMALL_BLIND} / $${BIG_BLIND}`;
 }
 
 // ── Command aliases ────────────────────────────────────────────────────────────
@@ -517,13 +520,71 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
   }
 
   await saveGame(env.GAMES_KV, state);
-  await sendResult(token, replyToken, result ?? { ok: true, groupMsg: replyText, privateMessages: {} });
+  await sendResult(token, replyToken, result ?? { ok: true, groupMsg: replyText, privateMessages: {} }, state);
 }
 
-async function sendResult(token: string, replyToken: string, result: ActionResult): Promise<void> {
-  if (result.mentionUserId && result.mentionName) {
-    await replyWithMention(token, replyToken, result.groupMsg, result.mentionUserId, result.mentionName);
+function buildActionQuickReply(state: GameState): QuickReplyItem[] | undefined {
+  // ── Waiting phase: invite join / start ──────────────────────────────────────
+  if (state.phase === 'waiting') {
+    return [
+      { label: '🙋 加入', text: '/join' },
+      { label: '🎮 開始', text: '/start' },
+    ];
+  }
+
+  // ── Showdown / between hands ─────────────────────────────────────────────────
+  if (state.phase === 'showdown') {
+    return [
+      { label: '▶️ 下一局', text: '/next' },
+      { label: '🙋 加入', text: '/join' },
+      { label: '💵 加倉', text: '/buyin' },
+      { label: '🚪 離開', text: '/leave' },
+      { label: '🏁 結束遊戲', text: '/endgame' },
+    ];
+  }
+
+  // ── Active betting phase ─────────────────────────────────────────────────────
+  const activePh = state.phase !== 'ended';
+  if (!activePh) return undefined;
+  const cur = state.players[state.currentIdx];
+  if (!cur || cur.folded || cur.allIn) return undefined;
+
+  const toCall = state.currentBet - cur.currentBet;
+  const pot = state.pot + toCall; // pot after calling
+  const items: QuickReplyItem[] = [];
+
+  if (toCall <= 0) {
+    items.push({ label: '✋ 過牌', text: '/check' });
   } else {
-    await replyMessage(token, replyToken, result.groupMsg);
+    items.push({ label: `💰 跟注 $${toCall}`, text: '/call' });
+  }
+
+  // Raise sizes: 1/3 pot, 1/2 pot, pot — skip if too small or exceeds chips
+  const raiseSizes = [
+    { label: '1/3 pot', amount: Math.round(pot / 3) },
+    { label: '1/2 pot', amount: Math.round(pot / 2) },
+    { label: 'pot',     amount: pot },
+  ];
+  for (const { label, amount } of raiseSizes) {
+    if (amount >= BIG_BLIND && amount < cur.chips) {
+      items.push({ label: `⬆️ ${label} +$${amount}`, text: `/raise ${amount}` });
+    }
+  }
+
+  items.push({ label: '🚀 全押', text: '/allin' });
+  if (toCall > 0) {
+    items.push({ label: '🃏 棄牌', text: '/fold' });
+  }
+  items.push({ label: '🙋 加入下局', text: '/join' });
+
+  return items;
+}
+
+async function sendResult(token: string, replyToken: string, result: ActionResult, state?: GameState): Promise<void> {
+  const qr = state ? buildActionQuickReply(state) : undefined;
+  if (result.mentionUserId && result.mentionName) {
+    await replyWithMention(token, replyToken, result.groupMsg, result.mentionUserId, result.mentionName, qr);
+  } else {
+    await replyMessage(token, replyToken, result.groupMsg, qr);
   }
 }

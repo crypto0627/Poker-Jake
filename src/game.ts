@@ -7,8 +7,8 @@ import { Card, makeDeck } from './card';
 import { bestHand, handName, HandScore } from './handEvaluator';
 import { SettlementEntry } from './accounts';
 
-export const SMALL_BLIND = 10;
-export const BIG_BLIND = 20;
+export const SMALL_BLIND = 5;
+export const BIG_BLIND = 10;
 export const STARTING_CHIPS = 1000;
 export const MAX_PLAYERS = 9;
 

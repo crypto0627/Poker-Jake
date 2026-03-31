@@ -88,60 +88,33 @@ export function buildMentionMessage({
   return { type: 'text', text, mention: { mentionees } };
 }
 
+export interface QuickReplyItem {
+  label: string;  // max 20 chars
+  text: string;   // message to send when tapped
+}
+
+function buildQuickReplyPayload(items: QuickReplyItem[]) {
+  return {
+    quickReply: {
+      items: items.map(item => ({
+        type: 'action',
+        action: { type: 'message', label: item.label, text: item.text },
+      })),
+    },
+  };
+}
+
 export async function replyMessage(
   token: string,
   replyToken: string,
-  text: string
-): Promise<void> {
-  const res = await fetch(`${LINE_API}/message/reply`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      replyToken,
-      messages: [{ type: 'text', text }],
-    }),
-  });
-  if (!res.ok) {
-    console.error('replyMessage failed:', res.status, await res.text());
-  }
-}
-
-/**
- * Reply with a real @mention using LINE Text Message v2 (released 2024-10-30).
- *
- * textV2 uses {placeholder} substitution — no index/length calculation needed.
- * The caller passes the plain display text (may include "@name" for readability);
- * replyWithMention will replace the first occurrence of "@{mentionName}" with a
- * {m0} placeholder, or prepend "{m0} " if @name is absent.
- */
-export async function replyWithMention(
-  token: string,
-  replyToken: string,
   text: string,
-  mentionUserId: string,
-  mentionName: string
+  quickReply?: QuickReplyItem[]
 ): Promise<void> {
-  // Replace "@name" in text with {m0} placeholder for textV2 substitution.
-  // If not found, prepend the mention so it always appears.
-  const pattern = `@${mentionName}`;
-  const bodyText = text.includes(pattern)
-    ? text.replace(pattern, '{m0}')
-    : `{m0} ${text}`;
-
   const message = {
-    type: 'textV2',
-    text: bodyText,
-    substitution: {
-      m0: {
-        type: 'mention',
-        mentionee: { type: 'user', userId: mentionUserId },
-      },
-    },
+    type: 'text',
+    text,
+    ...(quickReply?.length ? buildQuickReplyPayload(quickReply) : {}),
   };
-
   const res = await fetch(`${LINE_API}/message/reply`, {
     method: 'POST',
     headers: {
@@ -151,9 +124,56 @@ export async function replyWithMention(
     body: JSON.stringify({ replyToken, messages: [message] }),
   });
   if (!res.ok) {
+    console.error('replyMessage failed:', res.status, await res.text());
+  }
+}
+
+export async function replyWithMention(
+  token: string,
+  replyToken: string,
+  text: string,
+  mentionUserId: string,
+  mentionName: string,
+  quickReply?: QuickReplyItem[]
+): Promise<void> {
+  const pattern = `@${mentionName}`;
+  const bodyText = text.includes(pattern)
+    ? text.replace(pattern, '{m0}')
+    : `{m0} ${text}`;
+
+  // textV2 for mention; quickReply must be on a separate message (can't combine)
+  const messages: object[] = [
+    {
+      type: 'textV2',
+      text: bodyText,
+      substitution: {
+        m0: {
+          type: 'mention',
+          mentionee: { type: 'user', userId: mentionUserId },
+        },
+      },
+    },
+  ];
+
+  if (quickReply?.length) {
+    messages.push({
+      type: 'text',
+      text: '👇 選擇行動',
+      ...buildQuickReplyPayload(quickReply),
+    });
+  }
+
+  const res = await fetch(`${LINE_API}/message/reply`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ replyToken, messages }),
+  });
+  if (!res.ok) {
     console.error('replyWithMention failed:', res.status, await res.text());
-    // Fall back to plain text
-    await replyMessage(token, replyToken, text);
+    await replyMessage(token, replyToken, text, quickReply);
   }
 }
 
