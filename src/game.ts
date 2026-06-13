@@ -467,6 +467,17 @@ export function endGame(state: GameState, _userId: string): ActionResult {
 }
 
 function _doEndGame(state: GameState): ActionResult {
+  // If game was mid-hand (broken), reveal all hole cards
+  const midHand = !['waiting', 'showdown', 'ended'].includes(state.phase);
+  let holeCardReveal = '';
+  if (midHand) {
+    const lines = state.players
+      .filter((p) => p.holeCards.length > 0)
+      .map((p) => `  ${p.name}：${p.holeCards.map((c) => c.label).join('  ')}`);
+    if (lines.length > 0) {
+      holeCardReveal = `\n━━━━━━━━━━━━━━━\n🃏 手牌亮牌：\n${lines.join('\n')}`;
+    }
+  }
 
   // Collect settlements for all active players
   const settlements: SettlementEntry[] = [
@@ -496,10 +507,20 @@ function _doEndGame(state: GameState): ActionResult {
   state.queue = [];
 
   return ok(
-    `🎰 遊戲結束！\n` + finalStandings(state, settlements),
+    `🎰 遊戲結束！${holeCardReveal}\n` + finalStandings(state, settlements),
     {},
     { settlements }
   );
+}
+
+// ── Show hole cards (亮牌) ──────────────────────────────────────────────────────
+
+export function showCards(state: GameState, userId: string): ActionResult {
+  const player = findPlayer(state, userId);
+  if (!player) return fail('你不在這局遊戲中！');
+  if (!player.holeCards.length) return fail('你沒有手牌可以亮牌！');
+  const cardsStr = player.holeCards.map((c) => c.label).join('  ');
+  return ok(`🃏 ${player.name} 亮牌：${cardsStr}`);
 }
 
 export function buyIn(state: GameState, userId: string, amount: number): ActionResult {
@@ -671,7 +692,7 @@ function startNewHand(state: GameState): ActionResult {
   // ── 2. Move busted players (0 chips) to pendingBuyIn ─────────────────────
   const newBusted: Array<{ userId: string; name: string }> = [];
   state.players = state.players.filter((p) => {
-    if (p.chips === 0 && !state.pendingBuyIn.some((pb) => pb.userId === p.userId)) {
+    if (p.chips === 0 && p.pendingTopUp === 0 && !state.pendingBuyIn.some((pb) => pb.userId === p.userId)) {
       state.pendingBuyIn.push({
         userId: p.userId,
         name: p.name,

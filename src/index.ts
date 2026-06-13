@@ -39,6 +39,7 @@ import {
   getStatus,
   processAction,
   buyIn,
+  showCards,
   ActionResult,
   STARTING_CHIPS,
   BIG_BLIND,
@@ -256,7 +257,7 @@ const ALIASES: Record<string, string> = {
   '加注': '/raise', '全押': '/allin', '加倉': '/buyin',
   '下一局': '/next', '結束': '/endgame', '強制結束': '/forceend', '狀態': '/status', '連結': '/link',
   '手牌': '/cards', '帳戶': '/balance', '我的帳戶': '/balance',
-  '排行榜': '/rank', '幫助': '/help',
+  '排行榜': '/rank', '幫助': '/help', '亮牌': '/showcard',
 };
 
 // ── Main fetch handler ────────────────────────────────────────────────────────
@@ -488,6 +489,10 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
       replyText = `🃏 請點以下連結查看底牌：\n${buildLiffUrl(env.LIFF_URL, groupId)}`;
       break;
 
+    case '/showcard':
+      result = showCards(state, userId);
+      break;
+
     case '/balance': {
       const acc = (await loadAccount(env.GAMES_KV, userId)) ?? defaultAccount(userId, displayName);
       replyText = formatAccount({ ...acc, name: displayName });
@@ -536,6 +541,7 @@ function buildActionQuickReply(state: GameState): QuickReplyItem[] | undefined {
   if (state.phase === 'showdown') {
     return [
       { label: '▶️ 下一局', text: '/next' },
+      { label: '🃏 亮牌', text: '/showcard' },
       { label: '🙋 加入', text: '/join' },
       { label: '💵 加倉', text: '/buyin' },
       { label: '🚪 離開', text: '/leave' },
@@ -575,6 +581,7 @@ function buildActionQuickReply(state: GameState): QuickReplyItem[] | undefined {
   if (toCall > 0) {
     items.push({ label: '🃏 棄牌', text: '/fold' });
   }
+  items.push({ label: '🃏 亮牌', text: '/showcard' });
   items.push({ label: '🙋 加入下局', text: '/join' });
 
   return items;

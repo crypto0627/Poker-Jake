@@ -1,16 +1,48 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
-:root {
-  --felt: #1a4731;
-  --felt-dark: #122f22;
-  --gold: #f0b429;
-  --chip: #e63946;
+/*
+ * Palette — four families, nothing else:
+ *   felt    table greens (backgrounds, surfaces)
+ *   gold    chips & accents (pot, turn, wins)
+ *   crimson red suits & losses
+ *   ivory/ink neutrals (text, card faces)
+ */
+@theme {
+  --color-felt-deep: #0b2014;
+  --color-felt: #123524;
+  --color-felt-raised: #1a4530;
+  --color-felt-light: #4e9a6f;
+
+  --color-gold: #d4a843;
+  --color-gold-bright: #f0c860;
+
+  --color-crimson: #c8423a;
+  --color-crimson-soft: #e07a72;
+
+  --color-ivory: #f2ecdc;
+  --color-ink: #20241f;
+
+  --font-display: Georgia, 'Times New Roman', serif;
 }
 
 body {
-  background-color: var(--felt-dark);
-  color: #f1f5f0;
+  color: var(--color-ivory);
+  background-color: var(--color-felt-deep);
+  background-image: radial-gradient(
+    ellipse 130% 90% at 50% -10%,
+    var(--color-felt-raised),
+    var(--color-felt-deep) 75%
+  );
+  background-attachment: fixed;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   min-height: 100dvh;
   overscroll-behavior: none;
+}
+
+/* Crimson card back with a woven lattice, like a real deck */
+.card-back {
+  background:
+    repeating-linear-gradient(45deg, rgb(255 255 255 / 0.08) 0 2px, transparent 2px 8px),
+    repeating-linear-gradient(-45deg, rgb(255 255 255 / 0.08) 0 2px, transparent 2px 8px),
+    linear-gradient(150deg, #a8362c, #71211a);
 }

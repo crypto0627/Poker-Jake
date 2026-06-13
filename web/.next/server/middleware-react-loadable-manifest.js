@@ -1,1 +1,1 @@
-self.__REACT_LOADABLE_MANIFEST='{"app/page.tsx -> @/components/GameApp":{"id":12,"files":["static/chunks/12.2c89d1f796e04fe9.js"]},"components/GameApp.tsx -> @line/liff":{"id":5265,"files":["static/chunks/265.8838390625e2eb3d.js"]}}';
+self.__REACT_LOADABLE_MANIFEST='{"app/page.tsx -> @/components/GameApp":{"id":6266,"files":["static/chunks/266.a917f6b5aa702ea8.js"]},"components/GameApp.tsx -> @line/liff":{"id":5265,"files":["static/chunks/265.8838390625e2eb3d.js"]}}';

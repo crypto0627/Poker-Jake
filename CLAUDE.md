@@ -43,7 +43,7 @@ Two independent deployments sharing no code at runtime:
 
 **Frontend — Next.js static export (`web/`)**
 - Deployed to Cloudflare Pages via git push; `output: 'export'` in `next.config.ts` required.
-- Single component `GameApp.tsx` wraps LIFF init, auth, and all game UI.
+- `GameApp.tsx` handles LIFF init, auth, and data fetching; `GameView.tsx` + `PlayingCard.tsx` are pure presentational components. Design tokens (4 color families: felt / gold / crimson / ivory-ink) are defined in `globals.css` via Tailwind v4 `@theme`.
 - Polling is intentionally removed — refresh triggers are: (1) `visibilitychange` when switching back to the app, (2) manual refresh button.
 - `groupId` propagation: bot encodes it in `liff.state` query param (`buildLiffUrl`), frontend reads it from `liff.getContext()` or falls back to `?groupId=` URL param; `liff.login({ redirectUri: window.location.href })` preserves it through OAuth redirect.
 
