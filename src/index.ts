@@ -595,6 +595,7 @@ function buildActionQuickReply(state: GameState): QuickReplyItem[] | undefined {
     items.push({ label: '🃏 棄牌', text: '/fold' });
   }
   items.push({ label: '🃏 亮牌', text: '/showcard' });
+  items.push({ label: '⏰ 強制棄牌', text: '/forcefold' });
   items.push({ label: '🙋 加入下局', text: '/join' });
 
   return items;
