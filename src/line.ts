@@ -93,7 +93,7 @@ export interface QuickReplyItem {
   text: string;   // message to send when tapped
 }
 
-function buildQuickReplyPayload(items: QuickReplyItem[]) {
+export function buildQuickReplyPayload(items: QuickReplyItem[]) {
   return {
     quickReply: {
       items: items.map(item => ({
@@ -126,6 +126,56 @@ export async function replyMessage(
   if (!res.ok) {
     console.error('replyMessage failed:', res.status, await res.text());
   }
+}
+
+/**
+ * Builds a single reply-message object from a group message + optional mentions.
+ * Each mention's `@{name}` occurrence in the text (first match, in list order)
+ * is replaced with a textV2 substitution placeholder. Mentions whose name is
+ * not found in the text are skipped. With no matched mention it produces a
+ * plain text message.
+ */
+export function buildResultMessage(
+  text: string,
+  mentions: MentionInput[] = []
+): Record<string, unknown> {
+  const substitution: Record<string, unknown> = {};
+  let bodyText = text;
+  let count = 0;
+
+  for (const m of mentions) {
+    const pattern = `@${m.name}`;
+    if (!bodyText.includes(pattern)) continue;
+    const key = `m${count++}`;
+    bodyText = bodyText.replace(pattern, `{${key}}`);
+    substitution[key] = {
+      type: 'mention',
+      mentionee: { type: 'user', userId: m.userId },
+    };
+  }
+
+  if (count === 0) return { type: 'text', text };
+  return { type: 'textV2', text: bodyText, substitution };
+}
+
+/** Sends pre-built message objects in a single reply. Returns false on API error. */
+export async function replyRawMessages(
+  token: string,
+  replyToken: string,
+  messages: object[]
+): Promise<boolean> {
+  const res = await fetch(`${LINE_API}/message/reply`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ replyToken, messages }),
+  });
+  if (!res.ok) {
+    console.error('replyRawMessages failed:', res.status, await res.text());
+  }
+  return res.ok;
 }
 
 export async function replyWithMention(

@@ -11,6 +11,7 @@ export const SMALL_BLIND = 5;
 export const BIG_BLIND = 10;
 export const STARTING_CHIPS = 1000;
 export const MAX_PLAYERS = 9;
+export const TURN_TIMEOUT_MS = 5 * 60 * 1000;
 
 export type Phase =
   | 'waiting'
@@ -71,6 +72,7 @@ export interface GameState {
   currentBet: number;
   dealerIdx: number;
   currentIdx: number;
+  turnStartedAt: number;   // epoch ms when the current actor's turn began (0 = unknown)
 }
 
 export interface ActionResult {
@@ -79,6 +81,8 @@ export interface ActionResult {
   privateMessages: Record<string, string>;
   mentionUserId?: string;
   mentionName?: string;
+  /** Additional users to @mention in groupMsg (e.g. an auto-folded player) */
+  mentions?: Array<{ userId: string; name: string }>;
   /** Players who just hit 0 chips — index.ts should push them a buy-in prompt */
   bustedPlayers?: Array<{ userId: string; name: string }>;
   /** Session settlements to persist in KV accounts */
@@ -126,6 +130,7 @@ export function newGame(groupId: string): GameState {
     currentBet: 0,
     dealerIdx: 0,
     currentIdx: 0,
+    turnStartedAt: 0,
   };
 }
 
@@ -421,12 +426,14 @@ export function removePlayer(state: GameState, userId: string): ActionResult {
   const gameInProgress = !['waiting', 'ended', 'showdown'].includes(state.phase);
 
   if (gameInProgress) {
-    // Auto-fold if it's their turn
-    if (state.players[state.currentIdx]?.userId === userId && !player.folded) {
+    player.wantsToLeave = true;
+    // If it's their turn, auto-fold AND advance the turn (otherwise the game
+    // stalls waiting on a folded player).
+    if (state.players[state.currentIdx]?.userId === userId && !player.folded && !player.allIn) {
       player.folded = true;
       player.hasActed = true;
+      return afterAction(state, `👋 ${player.name} 申請離桌，自動棄牌，本局結束後退出。`);
     }
-    player.wantsToLeave = true;
     return ok(`👋 ${player.name} 申請離桌，本局結束後退出。`);
   }
 
@@ -674,6 +681,30 @@ export function processAction(
   return afterAction(state, actionMsg);
 }
 
+// ── Turn timeout (auto-fold) ──────────────────────────────────────────────────
+
+/**
+ * Auto-folds the current actor if they have been idle past TURN_TIMEOUT_MS.
+ * Called opportunistically from the webhook on any incoming group message.
+ * Returns null when nothing needs to happen.
+ */
+export function checkTurnTimeout(state: GameState, now = Date.now()): ActionResult | null {
+  if (['waiting', 'ended', 'showdown'].includes(state.phase)) return null;
+  const player = state.players[state.currentIdx];
+  if (!player || player.folded || player.allIn) return null;
+  if (!state.turnStartedAt || now - state.turnStartedAt < TURN_TIMEOUT_MS) return null;
+
+  player.folded = true;
+  player.hasActed = true;
+  state.turnStartedAt = now;
+  const result = afterAction(
+    state,
+    `@${player.name} 超過 ${TURN_TIMEOUT_MS / 60_000} 分鐘未行動，自動棄牌`
+  );
+  result.mentions = [{ userId: player.userId, name: player.name }];
+  return result;
+}
+
 // ── Internal game flow ────────────────────────────────────────────────────────
 
 function startNewHand(state: GameState): ActionResult {
@@ -774,6 +805,7 @@ function startNewHand(state: GameState): ActionResult {
   state.currentIdx = n === 2 ? sbIdx : (bbIdx + 1) % n;
   skipToCanAct(state);
   state.phase = 'preflop';
+  state.turnStartedAt = Date.now();
 
   const posLines = state.players.map((p) => {
     const tags = [p.isDealer && 'D', p.isSB && 'SB', p.isBB && 'BB'].filter(Boolean);
@@ -827,6 +859,7 @@ function afterAction(state: GameState, actionMsg: string): ActionResult {
   const next = findNextActor(state);
   if (!next) return advancePhase(state, actionMsg);
 
+  state.turnStartedAt = Date.now();
   const msg = `${actionMsg}\n━━━━━━━━━━━━━━━\n${tableStatus(state)}\n👉 @${next.name} 輪到你行動！`;
   return ok(msg, {}, { mentionUserId: next.userId, mentionName: next.name });
 }
@@ -864,6 +897,7 @@ function advancePhase(state: GameState, prevMsg: string): ActionResult {
   }
 
   const next = state.players[state.currentIdx];
+  state.turnStartedAt = Date.now();
   const msg =
     `${prevMsg}\n━━━━━━━━━━━━━━━\n🎴 ${phaseLabel}：${communityStr}\n` +
     `${tableStatus(state)}\n👉 @${next.name} 輪到你行動！`;

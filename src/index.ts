@@ -22,7 +22,9 @@
 import {
   verifySignature,
   replyMessage,
-  replyWithMention,
+  buildResultMessage,
+  buildQuickReplyPayload,
+  replyRawMessages,
   getGroupMemberProfile,
   QuickReplyItem,
 } from './line';
@@ -40,6 +42,7 @@ import {
   processAction,
   buyIn,
   showCards,
+  checkTurnTimeout,
   ActionResult,
   STARTING_CHIPS,
   BIG_BLIND,
@@ -72,6 +75,7 @@ async function loadGame(kv: KVNamespace, groupId: string): Promise<GameState> {
   // Backfill fields added after initial release
   raw.queue        ??= [];
   raw.pendingBuyIn ??= [];
+  raw.turnStartedAt ??= Date.now();  // treat pre-existing turns as starting now
   for (const p of raw.players ?? []) {
     p.wantsToLeave     ??= false;
     p.position         ??= '';
@@ -358,10 +362,27 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
 
   if (ALIASES[cmd]) cmd = ALIASES[cmd];
   cmd = cmd.toLowerCase();
-  if (!cmd.startsWith('/')) return;
 
   const token = env.LINE_CHANNEL_ACCESS_TOKEN;
+
+  // Non-command chatter still drives the idle clock: auto-fold the current
+  // actor if they've been idle past the timeout, then stop.
+  if (!cmd.startsWith('/')) {
+    const state = await loadGame(env.GAMES_KV, groupId);
+    const timedOut = checkTurnTimeout(state);
+    if (timedOut) {
+      await saveGame(env.GAMES_KV, state);
+      await sendResult(token, replyToken, timedOut, state);
+    }
+    return;
+  }
+
   const state = await loadGame(env.GAMES_KV, groupId);
+
+  // Auto-fold an over-idle current actor BEFORE processing this command,
+  // so the command runs against the updated state. The fold announcement is
+  // sent together with the command's reply.
+  const timeoutResult = checkTurnTimeout(state);
   // Use cached name from state to avoid an extra LINE API call on every command
   const knownPlayer =
     state.players.find(p => p.userId === userId) ??
@@ -447,7 +468,7 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
         }
       }
       await env.GAMES_KV.delete(groupId);
-      await sendResult(token, replyToken, result);
+      await sendResult(token, replyToken, timeoutResult ? [timeoutResult, result] : result);
       return;
     }
 
@@ -461,7 +482,7 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
         }
       }
       await env.GAMES_KV.delete(groupId);
-      await sendResult(token, replyToken, result);
+      await sendResult(token, replyToken, timeoutResult ? [timeoutResult, result] : result);
       return;
     }
 
@@ -525,7 +546,13 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
   }
 
   await saveGame(env.GAMES_KV, state);
-  await sendResult(token, replyToken, result ?? { ok: true, groupMsg: replyText, privateMessages: {} }, state);
+  const finalResult = result ?? { ok: true, groupMsg: replyText, privateMessages: {} };
+  await sendResult(
+    token,
+    replyToken,
+    timeoutResult ? [timeoutResult, finalResult] : finalResult,
+    state
+  );
 }
 
 function buildActionQuickReply(state: GameState): QuickReplyItem[] | undefined {
@@ -587,11 +614,36 @@ function buildActionQuickReply(state: GameState): QuickReplyItem[] | undefined {
   return items;
 }
 
-async function sendResult(token: string, replyToken: string, result: ActionResult, state?: GameState): Promise<void> {
+async function sendResult(
+  token: string,
+  replyToken: string,
+  results: ActionResult | ActionResult[],
+  state?: GameState
+): Promise<void> {
+  const list = Array.isArray(results) ? results : [results];
+  const messages = list.map((r) =>
+    buildResultMessage(r.groupMsg, [
+      ...(r.mentions ?? []),
+      ...(r.mentionUserId && r.mentionName
+        ? [{ userId: r.mentionUserId, name: r.mentionName }]
+        : []),
+    ])
+  );
+
   const qr = state ? buildActionQuickReply(state) : undefined;
-  if (result.mentionUserId && result.mentionName) {
-    await replyWithMention(token, replyToken, result.groupMsg, result.mentionUserId, result.mentionName, qr);
-  } else {
-    await replyMessage(token, replyToken, result.groupMsg, qr);
+  if (qr?.length) {
+    const last = messages[messages.length - 1];
+    if (last.type === 'text') {
+      Object.assign(last, buildQuickReplyPayload(qr));
+    } else {
+      // textV2 mention message — quickReply goes on a separate trailing message
+      messages.push({ type: 'text', text: '👇 選擇行動', ...buildQuickReplyPayload(qr) });
+    }
+  }
+
+  const sent = await replyRawMessages(token, replyToken, messages);
+  if (!sent) {
+    // Fallback: plain text without mentions (mirrors old replyWithMention behavior)
+    await replyMessage(token, replyToken, list.map((r) => r.groupMsg).join('\n\n'), qr);
   }
 }

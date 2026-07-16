@@ -15,6 +15,8 @@ import {
   buyIn,
   getStatus,
   getHoleCardsMessage,
+  checkTurnTimeout,
+  TURN_TIMEOUT_MS,
   STARTING_CHIPS,
   SMALL_BLIND,
   BIG_BLIND,
@@ -645,11 +647,72 @@ section('11. removePlayer mid-game sets wantsToLeave flag');
     assertOk(removeCur, 'removePlayer for current actor returns ok');
     assert(curActor.folded, 'Current actor auto-folded when leaving');
     assert(curActor.wantsToLeave, 'Current actor wantsToLeave = true');
+    assert(
+      g.phase === 'showdown' || g.players[g.currentIdx].userId !== curActor.userId,
+      'Turn advanced past the leaving actor (game not stalled)'
+    );
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TEST 12 – TypeScript compilation check
+// TEST 12 – checkTurnTimeout (auto-fold after idle timeout)
+// ═══════════════════════════════════════════════════════════════════════════════
+section('12. checkTurnTimeout auto-folds idle current actor');
+
+{
+  const g = newGame('g12');
+  addPlayer(g, 'u1', 'Alice');
+  addPlayer(g, 'u2', 'Bob');
+  addPlayer(g, 'u3', 'Carol');
+  startGame(g, 'u1');
+
+  assert(g.turnStartedAt > 0, 'turnStartedAt set when hand starts');
+
+  // Not yet timed out
+  const early = checkTurnTimeout(g, g.turnStartedAt + TURN_TIMEOUT_MS - 1);
+  assert(early === null, 'No auto-fold before timeout elapses');
+  const firstActor = g.players[g.currentIdx];
+  assert(!firstActor.folded, 'Current actor not folded before timeout');
+
+  // Timed out → auto-fold
+  const r1 = checkTurnTimeout(g, g.turnStartedAt + TURN_TIMEOUT_MS);
+  assert(r1 !== null && r1.ok, 'Auto-fold fires at timeout');
+  assertContains(r1!.groupMsg, '自動棄牌', 'Auto-fold message mentions 自動棄牌');
+  assertContains(r1!.groupMsg, `@${firstActor.name}`, 'Folded player is @-tagged in message');
+  assert(
+    r1!.mentions?.some((m) => m.userId === firstActor.userId) === true,
+    'Folded player included in mentions for LINE @mention'
+  );
+  assert(firstActor.folded, 'Idle actor is folded');
+  assert(g.players[g.currentIdx].userId !== firstActor.userId, 'Turn advanced to next player');
+  assert(r1!.mentionUserId === g.players[g.currentIdx].userId, 'Next actor is mentioned');
+
+  // Second consecutive timeout → only one non-folded player left → uncontested win
+  const r2 = checkTurnTimeout(g, g.turnStartedAt + TURN_TIMEOUT_MS);
+  assert(r2 !== null && r2.ok, 'Second auto-fold fires after another timeout');
+  assertContains(r2!.groupMsg, '獲勝', 'Hand ends uncontested after second fold');
+  assert(g.phase === 'showdown', 'Phase is showdown after uncontested win');
+
+  // No auto-fold outside betting phases
+  const r3 = checkTurnTimeout(g, g.turnStartedAt + TURN_TIMEOUT_MS * 10);
+  assert(r3 === null, 'No auto-fold during showdown');
+
+  // Normal action resets the idle clock
+  const g2 = newGame('g12b');
+  addPlayer(g2, 'u1', 'Alice');
+  addPlayer(g2, 'u2', 'Bob');
+  startGame(g2, 'u1');
+  const before = g2.turnStartedAt;
+  processAction(g2, g2.players[g2.currentIdx].userId, 'call');
+  assert(g2.turnStartedAt >= before, 'turnStartedAt refreshed after an action');
+  assert(
+    checkTurnTimeout(g2, g2.turnStartedAt + TURN_TIMEOUT_MS - 1) === null,
+    'Clock restarts for the next actor after an action'
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST 13 – TypeScript compilation check
 // ═══════════════════════════════════════════════════════════════════════════════
 section('12. TypeScript compilation (tsc --noEmit)');
 // This is done by running the file itself via tsx — if we reach this point, imports compiled.
