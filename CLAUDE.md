@@ -67,7 +67,7 @@ waiting → preflop → flop → turn → river → showdown → (next hand: pre
 - `startNewHand()` applies `pendingTopUp` (pre-reserved chip top-ups), moves `wantsToLeave` players out, promotes from `queue`, deals cards.
 - `advancePhase()` auto-runs out remaining community cards when `playersWhoCanAct().length <= 1` (i.e. all-in situation with no more betting possible).
 - `forceEndGame()` skips phase checks; `endGame()` requires active game.
-- Turn timeout: `state.turnStartedAt` is stamped whenever the turn passes to a new actor; `checkTurnTimeout()` auto-folds the current actor after `TURN_TIMEOUT_MS` (5 min), @-mentioning the folded player via `ActionResult.mentions`. There is no cron — the check runs lazily in `handleEvent` on ANY incoming group text message (commands and plain chatter alike), so a fold only fires when someone next speaks in the group.
+- Turn timeout: `state.turnStartedAt` is stamped whenever the turn passes to a new actor. There is NO auto-fold — after `TURN_TIMEOUT_MS` (5 min) of idleness, another player must issue `/forcefold` (alias `強制棄牌`), which calls `forceFold()` to fold the current actor, @-mentioning them via `ActionResult.mentions`. Before the timeout elapses (or if the requester is the current actor), `forceFold()` returns a failure message.
 
 ## Key Constants (`game.ts`)
 - 使ㄩㄥSTARTING_CHIPS = 1000`, `SMALL_BLIND = 10`, `BIG_BLIND = 20`, `MAX_PLAYERS = 9`

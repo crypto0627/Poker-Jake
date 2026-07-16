@@ -15,7 +15,7 @@ import {
   buyIn,
   getStatus,
   getHoleCardsMessage,
-  checkTurnTimeout,
+  forceFold,
   TURN_TIMEOUT_MS,
   STARTING_CHIPS,
   SMALL_BLIND,
@@ -655,9 +655,9 @@ section('11. removePlayer mid-game sets wantsToLeave flag');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// TEST 12 – checkTurnTimeout (auto-fold after idle timeout)
+// TEST 12 – forceFold (/forcefold after idle timeout)
 // ═══════════════════════════════════════════════════════════════════════════════
-section('12. checkTurnTimeout auto-folds idle current actor');
+section('12. forceFold folds idle current actor only on request after timeout');
 
 {
   const g = newGame('g12');
@@ -668,34 +668,44 @@ section('12. checkTurnTimeout auto-folds idle current actor');
 
   assert(g.turnStartedAt > 0, 'turnStartedAt set when hand starts');
 
-  // Not yet timed out
-  const early = checkTurnTimeout(g, g.turnStartedAt + TURN_TIMEOUT_MS - 1);
-  assert(early === null, 'No auto-fold before timeout elapses');
   const firstActor = g.players[g.currentIdx];
+  const other = g.players.find((p) => p.userId !== firstActor.userId)!;
+
+  // Not yet timed out → force fold rejected
+  const early = forceFold(g, other.userId, g.turnStartedAt + TURN_TIMEOUT_MS - 1);
+  assert(!early.ok, 'Force fold rejected before timeout elapses');
+  assertContains(early.groupMsg, '尚未超時', 'Rejection message says not timed out yet');
   assert(!firstActor.folded, 'Current actor not folded before timeout');
 
-  // Timed out → auto-fold
-  const r1 = checkTurnTimeout(g, g.turnStartedAt + TURN_TIMEOUT_MS);
-  assert(r1 !== null && r1.ok, 'Auto-fold fires at timeout');
-  assertContains(r1!.groupMsg, '自動棄牌', 'Auto-fold message mentions 自動棄牌');
-  assertContains(r1!.groupMsg, `@${firstActor.name}`, 'Folded player is @-tagged in message');
+  // Timed out, but requester is the actor themselves → rejected
+  const self = forceFold(g, firstActor.userId, g.turnStartedAt + TURN_TIMEOUT_MS);
+  assert(!self.ok, 'Actor cannot force-fold themselves');
+  assert(!firstActor.folded, 'Actor still not folded after self force fold attempt');
+
+  // Timed out + requested by another player → fold
+  const r1 = forceFold(g, other.userId, g.turnStartedAt + TURN_TIMEOUT_MS);
+  assert(r1.ok, 'Force fold succeeds at timeout when requested by another player');
+  assertContains(r1.groupMsg, '強制棄牌', 'Force-fold message mentions 強制棄牌');
+  assertContains(r1.groupMsg, `@${firstActor.name}`, 'Folded player is @-tagged in message');
   assert(
-    r1!.mentions?.some((m) => m.userId === firstActor.userId) === true,
+    r1.mentions?.some((m) => m.userId === firstActor.userId) === true,
     'Folded player included in mentions for LINE @mention'
   );
   assert(firstActor.folded, 'Idle actor is folded');
   assert(g.players[g.currentIdx].userId !== firstActor.userId, 'Turn advanced to next player');
-  assert(r1!.mentionUserId === g.players[g.currentIdx].userId, 'Next actor is mentioned');
+  assert(r1.mentionUserId === g.players[g.currentIdx].userId, 'Next actor is mentioned');
 
-  // Second consecutive timeout → only one non-folded player left → uncontested win
-  const r2 = checkTurnTimeout(g, g.turnStartedAt + TURN_TIMEOUT_MS);
-  assert(r2 !== null && r2.ok, 'Second auto-fold fires after another timeout');
-  assertContains(r2!.groupMsg, '獲勝', 'Hand ends uncontested after second fold');
+  // Second consecutive force fold → only one non-folded player left → uncontested win
+  const secondActor = g.players[g.currentIdx];
+  const requester2 = g.players.find((p) => p.userId !== secondActor.userId)!;
+  const r2 = forceFold(g, requester2.userId, g.turnStartedAt + TURN_TIMEOUT_MS);
+  assert(r2.ok, 'Second force fold fires after another timeout');
+  assertContains(r2.groupMsg, '獲勝', 'Hand ends uncontested after second fold');
   assert(g.phase === 'showdown', 'Phase is showdown after uncontested win');
 
-  // No auto-fold outside betting phases
-  const r3 = checkTurnTimeout(g, g.turnStartedAt + TURN_TIMEOUT_MS * 10);
-  assert(r3 === null, 'No auto-fold during showdown');
+  // No force fold outside betting phases
+  const r3 = forceFold(g, 'u1', g.turnStartedAt + TURN_TIMEOUT_MS * 10);
+  assert(!r3.ok, 'No force fold during showdown');
 
   // Normal action resets the idle clock
   const g2 = newGame('g12b');
@@ -705,8 +715,10 @@ section('12. checkTurnTimeout auto-folds idle current actor');
   const before = g2.turnStartedAt;
   processAction(g2, g2.players[g2.currentIdx].userId, 'call');
   assert(g2.turnStartedAt >= before, 'turnStartedAt refreshed after an action');
+  const afterActor = g2.players[g2.currentIdx];
+  const otherRequester = g2.players.find((p) => p.userId !== afterActor.userId)!;
   assert(
-    checkTurnTimeout(g2, g2.turnStartedAt + TURN_TIMEOUT_MS - 1) === null,
+    !forceFold(g2, otherRequester.userId, g2.turnStartedAt + TURN_TIMEOUT_MS - 1).ok,
     'Clock restarts for the next actor after an action'
   );
 }

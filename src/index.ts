@@ -42,7 +42,7 @@ import {
   processAction,
   buyIn,
   showCards,
-  checkTurnTimeout,
+  forceFold,
   ActionResult,
   STARTING_CHIPS,
   BIG_BLIND,
@@ -236,6 +236,7 @@ function buildHelpText(liffUrl: string): string {
   /raise 或  加注 <金額>  — 加注（例: /raise 100）
   /allin 或  全押        — 全押
   /buyin 或  加倉 [金額]  — 加倉（上限 $${STARTING_CHIPS}，下一局生效）
+  /forcefold 或 強制棄牌 — 當前玩家超過 5 分鐘未行動時，其他人可強制他棄牌
 
 【其他】
   /next     或 下一局  — 下一局
@@ -258,7 +259,7 @@ ${liffUrl}
 const ALIASES: Record<string, string> = {
   '加入': '/join', '離開': '/leave', '開始': '/start',
   '跟注': '/call', '過牌': '/check', '棄牌': '/fold',
-  '加注': '/raise', '全押': '/allin', '加倉': '/buyin',
+  '加注': '/raise', '全押': '/allin', '加倉': '/buyin', '強制棄牌': '/forcefold',
   '下一局': '/next', '結束': '/endgame', '強制結束': '/forceend', '狀態': '/status', '連結': '/link',
   '手牌': '/cards', '帳戶': '/balance', '我的帳戶': '/balance',
   '排行榜': '/rank', '幫助': '/help', '亮牌': '/showcard',
@@ -365,24 +366,10 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
 
   const token = env.LINE_CHANNEL_ACCESS_TOKEN;
 
-  // Non-command chatter still drives the idle clock: auto-fold the current
-  // actor if they've been idle past the timeout, then stop.
-  if (!cmd.startsWith('/')) {
-    const state = await loadGame(env.GAMES_KV, groupId);
-    const timedOut = checkTurnTimeout(state);
-    if (timedOut) {
-      await saveGame(env.GAMES_KV, state);
-      await sendResult(token, replyToken, timedOut, state);
-    }
-    return;
-  }
+  if (!cmd.startsWith('/')) return;
 
   const state = await loadGame(env.GAMES_KV, groupId);
 
-  // Auto-fold an over-idle current actor BEFORE processing this command,
-  // so the command runs against the updated state. The fold announcement is
-  // sent together with the command's reply.
-  const timeoutResult = checkTurnTimeout(state);
   // Use cached name from state to avoid an extra LINE API call on every command
   const knownPlayer =
     state.players.find(p => p.userId === userId) ??
@@ -440,6 +427,10 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
       result = processAction(state, userId, 'allin');
       break;
 
+    case '/forcefold':
+      result = forceFold(state, userId);
+      break;
+
     case '/buyin': {
       const amt = parseInt(args[0] ?? '', 10) || STARTING_CHIPS;
       result = buyIn(state, userId, amt);
@@ -468,7 +459,7 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
         }
       }
       await env.GAMES_KV.delete(groupId);
-      await sendResult(token, replyToken, timeoutResult ? [timeoutResult, result] : result);
+      await sendResult(token, replyToken, result);
       return;
     }
 
@@ -482,7 +473,7 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
         }
       }
       await env.GAMES_KV.delete(groupId);
-      await sendResult(token, replyToken, timeoutResult ? [timeoutResult, result] : result);
+      await sendResult(token, replyToken, result);
       return;
     }
 
@@ -547,12 +538,7 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
 
   await saveGame(env.GAMES_KV, state);
   const finalResult = result ?? { ok: true, groupMsg: replyText, privateMessages: {} };
-  await sendResult(
-    token,
-    replyToken,
-    timeoutResult ? [timeoutResult, finalResult] : finalResult,
-    state
-  );
+  await sendResult(token, replyToken, finalResult, state);
 }
 
 function buildActionQuickReply(state: GameState): QuickReplyItem[] | undefined {

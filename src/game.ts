@@ -681,25 +681,33 @@ export function processAction(
   return afterAction(state, actionMsg);
 }
 
-// ── Turn timeout (auto-fold) ──────────────────────────────────────────────────
+// ── Turn timeout (/forcefold) ─────────────────────────────────────────────────
 
 /**
- * Auto-folds the current actor if they have been idle past TURN_TIMEOUT_MS.
- * Called opportunistically from the webhook on any incoming group message.
- * Returns null when nothing needs to happen.
+ * Folds the current actor on request from ANOTHER player, allowed only after
+ * the actor has been idle past TURN_TIMEOUT_MS. The timeout alone never folds
+ * anyone — someone must issue /forcefold.
  */
-export function checkTurnTimeout(state: GameState, now = Date.now()): ActionResult | null {
-  if (['waiting', 'ended', 'showdown'].includes(state.phase)) return null;
+export function forceFold(state: GameState, requesterId: string, now = Date.now()): ActionResult {
+  if (['waiting', 'ended', 'showdown'].includes(state.phase)) {
+    return fail('目前沒有進行中的下注回合！');
+  }
   const player = state.players[state.currentIdx];
-  if (!player || player.folded || player.allIn) return null;
-  if (!state.turnStartedAt || now - state.turnStartedAt < TURN_TIMEOUT_MS) return null;
+  if (!player || player.folded || player.allIn) return fail('目前沒有等待行動的玩家！');
+  if (player.userId === requesterId) return fail('要棄自己的牌請用 /fold！');
+  if (!state.turnStartedAt || now - state.turnStartedAt < TURN_TIMEOUT_MS) {
+    const remainSec = Math.max(0, Math.ceil((state.turnStartedAt + TURN_TIMEOUT_MS - now) / 1000));
+    const m = Math.floor(remainSec / 60);
+    const s = remainSec % 60;
+    return fail(`${player.name} 尚未超時，還要等 ${m} 分 ${s} 秒才能強制棄牌！`);
+  }
 
   player.folded = true;
   player.hasActed = true;
   state.turnStartedAt = now;
   const result = afterAction(
     state,
-    `@${player.name} 超過 ${TURN_TIMEOUT_MS / 60_000} 分鐘未行動，自動棄牌`
+    `@${player.name} 超過 ${TURN_TIMEOUT_MS / 60_000} 分鐘未行動，被強制棄牌`
   );
   result.mentions = [{ userId: player.userId, name: player.name }];
   return result;
