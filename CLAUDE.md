@@ -67,7 +67,10 @@ waiting → preflop → flop → turn → river → showdown → (next hand: pre
 - `startNewHand()` applies `pendingTopUp` (pre-reserved chip top-ups), moves `wantsToLeave` players out, promotes from `queue`, deals cards.
 - `advancePhase()` auto-runs out remaining community cards when `playersWhoCanAct().length <= 1` (i.e. all-in situation with no more betting possible).
 - `forceEndGame()` skips phase checks; `endGame()` requires active game.
-- Turn timeout: `state.turnStartedAt` is stamped whenever the turn passes to a new actor. There is NO auto-fold — after `TURN_TIMEOUT_MS` (5 min) of idleness, another player must issue `/forcefold` (alias `強制棄牌`), which calls `forceFold()` to fold the current actor, @-mentioning them via `ActionResult.mentions`. Before the timeout elapses (or if the requester is the current actor), `forceFold()` returns a failure message.
+- Turn timeout: `state.turnStartedAt` is stamped whenever the turn passes to a new actor. There is NO auto-fold — after `TURN_TIMEOUT_MS` (2 min) of idleness, another player must issue `/forcefold` (alias `強制棄牌`), which calls `forceFold()` to fold the current actor, @-mentioning them via `ActionResult.mentions`. Before the timeout elapses (or if the requester is the current actor), `forceFold()` returns a failure message.
+
+## Raise Rules
+`processAction(..., 'raise', amount)` treats `amount` as chips added ON TOP of `state.currentBet` (raise BY, not raise TO). `amount` must be an integer multiple of `SMALL_BLIND` and at least `BIG_BLIND` (the min-raise check is waived when the player would be all-in). The quick-reply pot-fraction buttons in `index.ts` snap their suggested amounts to `SMALL_BLIND` steps so they always satisfy this rule.
 
 ## Key Constants (`game.ts`)
 - 使ㄩㄥSTARTING_CHIPS = 1000`, `SMALL_BLIND = 10`, `BIG_BLIND = 20`, `MAX_PLAYERS = 9`

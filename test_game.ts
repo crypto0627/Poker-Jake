@@ -203,22 +203,35 @@ section('4. Raise / re-raise cycle');
   // Heads-up: dealer = SB, non-dealer = BB
   // currentIdx points to SB (first to act preflop in HU)
   const actor1 = g.players[g.currentIdx];
-  // Raise to 60 (toCall=10 from SB, min raise = 10+20=30 total => raise to at least 30)
-  const raiseR = processAction(g, actor1.userId, 'raise', 60);
-  assertOk(raiseR, 'SB raises to 60');
+  // `amount` is the raise ON TOP of currentBet: currentBet 10 + 50 => total 60
+  const raiseR = processAction(g, actor1.userId, 'raise', 50);
+  assertOk(raiseR, 'SB raises by 50 (to 60)');
   assert(g.currentBet === 60, `currentBet = 60 after raise, got ${g.currentBet}`);
 
-  // BB re-raises
+  // BB re-raises: currentBet 60 + 120 => total 180
   const actor2 = g.players[g.currentIdx];
   assert(actor2.userId !== actor1.userId, 'Turn moved to opponent');
-  const reraiseR = processAction(g, actor2.userId, 'raise', 180);
-  assertOk(reraiseR, 'BB re-raises to 180');
+  const reraiseR = processAction(g, actor2.userId, 'raise', 120);
+  assertOk(reraiseR, 'BB re-raises by 120 (to 180)');
   assert(g.currentBet === 180, `currentBet = 180 after re-raise, got ${g.currentBet}`);
 
-  // Too-small raise rejected
+  // Below the minimum raise (BIG_BLIND) is rejected
   const actor3 = g.players[g.currentIdx];
-  const badRaise = processAction(g, actor3.userId, 'raise', 10);
+  const badRaise = processAction(g, actor3.userId, 'raise', SMALL_BLIND);
   assertFail(badRaise, 'Raise below minimum is rejected');
+
+  // Non-multiple of SMALL_BLIND is rejected, even when above the minimum
+  const oddRaise = processAction(g, actor3.userId, 'raise', BIG_BLIND + 3);
+  assertFail(oddRaise, 'Raise that is not a multiple of SMALL_BLIND is rejected');
+  assertContains(oddRaise.groupMsg, '倍數', 'Rejection explains the multiple-of-5 rule');
+
+  // A multiple of SMALL_BLIND above the minimum is accepted
+  const okRaise = processAction(g, actor3.userId, 'raise', BIG_BLIND + SMALL_BLIND);
+  assertOk(okRaise, 'Raise of BIG_BLIND + SMALL_BLIND is accepted');
+  assert(
+    g.currentBet % SMALL_BLIND === 0,
+    `currentBet stays a multiple of ${SMALL_BLIND}, got ${g.currentBet}`
+  );
 
   // Fold to end the hand
   processAction(g, g.players[g.currentIdx].userId, 'fold');
@@ -536,14 +549,14 @@ section('10. Edge cases: invalid commands');
     assert(true, 'Actor has no call obligation (BB), skipping check-rejection test');
   }
 
-  // Raise too small
+  // Raise too small (a multiple of SMALL_BLIND, but under the BIG_BLIND minimum)
   const actorNow = g.players[g.currentIdx];
-  const toCallNow = g.currentBet - actorNow.currentBet;
-  const tooSmall = toCallNow + 1; // below minimum raise
-  const badRaise = processAction(g, actorNow.userId, 'raise', tooSmall);
-  if (toCallNow + 1 < toCallNow + BIG_BLIND) {
-    assertFail(badRaise, 'Raise below minimum is rejected');
-  }
+  const badRaise = processAction(g, actorNow.userId, 'raise', SMALL_BLIND);
+  assertFail(badRaise, 'Raise below minimum is rejected');
+
+  // Raise that is not a multiple of SMALL_BLIND
+  const oddRaise2 = processAction(g, actorNow.userId, 'raise', BIG_BLIND + 1);
+  assertFail(oddRaise2, 'Non-multiple-of-SMALL_BLIND raise is rejected');
 
   // Unknown action
   const unknown = processAction(g, actorNow.userId, 'moonwalk');

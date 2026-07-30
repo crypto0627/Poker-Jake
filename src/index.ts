@@ -233,10 +233,10 @@ function buildHelpText(liffUrl: string): string {
   /call  或  跟注        — 跟注
   /check 或  過牌        — 過牌
   /fold  或  棄牌        — 棄牌
-  /raise 或  加注 <金額>  — 加注（例: /raise 100）
+  /raise 或  加注 <金額>  — 加注，須為 $${SMALL_BLIND} 的倍數（例: /raise 100）
   /allin 或  全押        — 全押
   /buyin 或  加倉 [金額]  — 加倉（上限 $${STARTING_CHIPS}，下一局生效）
-  /forcefold 或 強制棄牌 — 當前玩家超過 5 分鐘未行動時，其他人可強制他棄牌
+  /forcefold 或 強制棄牌 — 當前玩家超過 2 分鐘未行動時，其他人可強制他棄牌
 
 【其他】
   /next     或 下一局  — 下一局
@@ -578,14 +578,18 @@ function buildActionQuickReply(state: GameState): QuickReplyItem[] | undefined {
     items.push({ label: `💰 跟注 $${toCall}`, text: '/call' });
   }
 
-  // Raise sizes: 1/3 pot, 1/2 pot, pot — skip if too small or exceeds chips
+  // Raise sizes: 1/3 pot, 1/2 pot, pot — snapped to SMALL_BLIND steps so the
+  // suggested amounts pass the multiple-of-SMALL_BLIND check in processAction.
+  const snap = (n: number) => Math.round(n / SMALL_BLIND) * SMALL_BLIND;
   const raiseSizes = [
-    { label: '1/3 pot', amount: Math.round(pot / 3) },
-    { label: '1/2 pot', amount: Math.round(pot / 2) },
-    { label: 'pot',     amount: pot },
+    { label: '1/3 pot', amount: snap(pot / 3) },
+    { label: '1/2 pot', amount: snap(pot / 2) },
+    { label: 'pot',     amount: snap(pot) },
   ];
+  const seenRaises = new Set<number>();
   for (const { label, amount } of raiseSizes) {
-    if (amount >= BIG_BLIND && amount < cur.chips) {
+    if (amount >= BIG_BLIND && amount < cur.chips && !seenRaises.has(amount)) {
+      seenRaises.add(amount);
       items.push({ label: `⬆️ ${label} +$${amount}`, text: `/raise ${amount}` });
     }
   }

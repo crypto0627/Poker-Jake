@@ -11,7 +11,7 @@ export const SMALL_BLIND = 5;
 export const BIG_BLIND = 10;
 export const STARTING_CHIPS = 1000;
 export const MAX_PLAYERS = 9;
-export const TURN_TIMEOUT_MS = 5 * 60 * 1000;
+export const TURN_TIMEOUT_MS = 2 * 60 * 1000;
 
 export type Phase =
   | 'waiting'
@@ -646,6 +646,9 @@ export function processAction(
 
     case 'raise': {
       // amount = chips to add ON TOP of state.currentBet (e.g. /raise 30 when BB=20 → total 50)
+      if (!Number.isInteger(amount) || amount % SMALL_BLIND !== 0) {
+        return fail(`加注金額必須是 $${SMALL_BLIND} 的倍數（例如 $${BIG_BLIND}、$${BIG_BLIND + SMALL_BLIND}、$${BIG_BLIND * 2}）`);
+      }
       if (amount < BIG_BLIND && player.chips > state.currentBet + amount - player.currentBet) {
         return fail(`最少需加注 $${BIG_BLIND}`);
       }
