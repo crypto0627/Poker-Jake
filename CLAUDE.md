@@ -51,11 +51,12 @@ Two independent deployments sharing no code at runtime:
 
 | Key | Value | TTL |
 |-----|-------|-----|
-| `{groupId}` | `GameState` JSON | 24 h (refreshed each save) |
 | `a:{userId}` | `PlayerAccount` JSON | permanent |
 | `gm:{groupId}` | `string[]` (member list) | permanent |
 
-`loadGame` in `index.ts` backfills new fields with `??=` for backwards compatibility with existing KV data.
+**Game state is NOT in KV** — it lives in the `GameRoom` Durable Object (one per group, `idFromName(groupId)`, storage key `state`). All commands for a group run through `GameRoom.handleEvent`, which serializes them with a promise queue (needed because handlers await LINE/KV fetches, which would otherwise interleave). This replaced the old KV read-modify-write, whose lost updates caused folded players to get the turn back. An alarm deletes the state after 24 h idle. On first load, the DO migrates any legacy `{groupId}` KV entry and deletes it. Only successful commands in `MUTATING_COMMANDS` save state.
+
+`normalizeGame` in `index.ts` backfills new fields with `??=` for backwards compatibility with older stored state.
 
 ## Game State Flow
 

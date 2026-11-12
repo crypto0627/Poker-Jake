@@ -9,7 +9,7 @@
  *   LIFF_URL   — https://liff.line.me/{LIFF_ID}  (web app for viewing hole cards)
  *
  * KV namespace:  GAMES_KV
- *   {groupId}        → GameState
+ *   (game state lives in the GameRoom Durable Object, one per group)
  *   a:{userId}       → PlayerAccount  (only updated at /endgame)
  *   gm:{groupId}     → string[]       (member list for leaderboard)
  *
@@ -18,6 +18,8 @@
  *   GET  /api/player       — LIFF web app fetches game state + hole cards
  *   OPTIONS /api/player    — CORS preflight
  */
+
+import { DurableObject } from 'cloudflare:workers';
 
 import {
   verifySignature,
@@ -65,13 +67,12 @@ export interface Env {
   LINE_CHANNEL_ACCESS_TOKEN: string;
   LIFF_URL: string;
   GAMES_KV: KVNamespace;
+  GAME_ROOM: DurableObjectNamespace<GameRoom>;
 }
 
-// ── KV helpers ────────────────────────────────────────────────────────────────
+// ── Game state normalisation ──────────────────────────────────────────────────
 
-async function loadGame(kv: KVNamespace, groupId: string): Promise<GameState> {
-  const raw = (await kv.get(groupId, 'json')) as GameState | null;
-  if (!raw) return newGame(groupId);
+function normalizeGame(raw: GameState): GameState {
   // Backfill fields added after initial release
   raw.queue        ??= [];
   raw.pendingBuyIn ??= [];
@@ -86,8 +87,80 @@ async function loadGame(kv: KVNamespace, groupId: string): Promise<GameState> {
   return raw;
 }
 
-async function saveGame(kv: KVNamespace, state: GameState): Promise<void> {
-  await kv.put(state.groupId, JSON.stringify(state), { expirationTtl: 86_400 });
+/** Persistence for a single group's GameState (backed by the GameRoom DO). */
+interface GameStore {
+  load(groupId: string): Promise<GameState>;
+  save(state: GameState): Promise<void>;
+  remove(): Promise<void>;
+}
+
+function roomStub(env: Env, groupId: string): DurableObjectStub<GameRoom> {
+  return env.GAME_ROOM.get(env.GAME_ROOM.idFromName(groupId));
+}
+
+// ── GameRoom Durable Object ───────────────────────────────────────────────────
+//
+// One instance per LINE group. All commands for a group run inside it, one at
+// a time, so concurrent webhooks can never overwrite each other's moves (the
+// old KV read-modify-write had no locking and could return stale reads).
+
+const STATE_KEY = 'state';
+const IDLE_TTL_MS = 24 * 60 * 60 * 1000;  // drop abandoned games after 24 h idle
+
+export class GameRoom extends DurableObject<Env> {
+  /** Tail of the serial command queue. */
+  private tail: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Run `fn` after every previously queued command has finished. Storage input
+   * gates alone aren't enough: handleEvent awaits external fetches (LINE API,
+   * KV accounts), during which other requests would otherwise interleave.
+   */
+  private serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.tail.then(fn, fn);
+    this.tail = run.catch(() => {});
+    return run;
+  }
+
+  private store(): GameStore {
+    return {
+      load: async (groupId) => {
+        let raw = await this.ctx.storage.get<GameState>(STATE_KEY);
+        if (!raw) {
+          // One-time migration from the old KV-stored game state
+          const legacy = (await this.env.GAMES_KV.get(groupId, 'json')) as GameState | null;
+          if (legacy) {
+            raw = legacy;
+            await this.ctx.storage.put(STATE_KEY, legacy);
+            await this.env.GAMES_KV.delete(groupId);
+          }
+        }
+        return raw ? normalizeGame(raw) : newGame(groupId);
+      },
+      save: async (state) => {
+        await this.ctx.storage.put(STATE_KEY, state);
+        await this.ctx.storage.setAlarm(Date.now() + IDLE_TTL_MS);
+      },
+      remove: async () => {
+        await this.ctx.storage.delete(STATE_KEY);
+        await this.ctx.storage.deleteAlarm();
+      },
+    };
+  }
+
+  /** Process one LINE group event (serialized per group). */
+  async handleEvent(event: LineEvent): Promise<void> {
+    return this.serialize(() => handleEvent(event, this.env, this.store()));
+  }
+
+  /** Read-only snapshot for the LIFF API (waits for in-flight commands). */
+  async getState(groupId: string): Promise<GameState> {
+    return this.serialize(() => this.store().load(groupId));
+  }
+
+  async alarm(): Promise<void> {
+    await this.ctx.storage.delete(STATE_KEY);
+  }
 }
 
 // ── CORS headers ──────────────────────────────────────────────────────────────
@@ -132,7 +205,7 @@ async function handlePlayerAPI(request: Request, env: Env): Promise<Response> {
   const lineProfile = await profileRes.json() as { userId: string; displayName: string };
 
   const [state, account] = await Promise.all([
-    loadGame(env.GAMES_KV, groupId),
+    roomStub(env, groupId).getState(groupId),
     loadAccount(env.GAMES_KV, lineProfile.userId),
   ]);
 
@@ -265,6 +338,12 @@ const ALIASES: Record<string, string> = {
   '排行榜': '/rank', '幫助': '/help', '亮牌': '/showcard',
 };
 
+// Commands that change GameState and therefore need saving on success.
+const MUTATING_COMMANDS = new Set([
+  '/join', '/leave', '/start', '/call', '/check', '/fold', '/raise',
+  '/allin', '/forcefold', '/buyin', '/next',
+]);
+
 // ── Main fetch handler ────────────────────────────────────────────────────────
 
 export default {
@@ -312,7 +391,13 @@ export default {
       (async () => {
         for (const evt of payload.events) {
           try {
-            await handleEvent(evt, env);
+            if (evt.source.type === 'group' && evt.source.groupId) {
+              // Skip plain chat early so only commands wake the Durable Object
+              if (!isCommandEvent(evt)) continue;
+              await roomStub(env, evt.source.groupId).handleEvent(evt);
+            } else {
+              await handleEvent(evt, env, null);
+            }
           } catch (e) {
             console.error('handleEvent error:', e);
           }
@@ -335,7 +420,20 @@ interface LineEvent {
 
 // ── Event dispatcher ──────────────────────────────────────────────────────────
 
-async function handleEvent(event: LineEvent, env: Env): Promise<void> {
+function parseCommand(rawText: string): { cmd: string; args: string[] } {
+  const parts = rawText.trim().split(/\s+/);
+  let cmd = parts[0];
+  if (ALIASES[cmd]) cmd = ALIASES[cmd];
+  return { cmd: cmd.toLowerCase(), args: parts.slice(1) };
+}
+
+function isCommandEvent(event: LineEvent): boolean {
+  if (event.type !== 'message' || event.message?.type !== 'text') return false;
+  return parseCommand(event.message.text ?? '').cmd.startsWith('/');
+}
+
+/** `store` is null only for non-group events, which never touch game state. */
+async function handleEvent(event: LineEvent, env: Env, store: GameStore | null): Promise<void> {
   console.log('event:', JSON.stringify({
     type: event.type,
     sourceType: event.source.type,
@@ -344,7 +442,7 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
 
   if (event.type !== 'message' || event.message?.type !== 'text') return;
 
-  if (event.source.type !== 'group') {
+  if (event.source.type !== 'group' || !store) {
     if (event.replyToken) {
       await replyMessage(env.LINE_CHANNEL_ACCESS_TOKEN, event.replyToken,
         '請在群組中使用這個機器人！\n輸入 /help 查看指令。');
@@ -357,18 +455,13 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
   const replyToken = event.replyToken!;
   const rawText = (event.message!.text ?? '').trim();
 
-  const parts = rawText.split(/\s+/);
-  let cmd = parts[0];
-  const args = parts.slice(1);
-
-  if (ALIASES[cmd]) cmd = ALIASES[cmd];
-  cmd = cmd.toLowerCase();
+  const { cmd, args } = parseCommand(rawText);
 
   const token = env.LINE_CHANNEL_ACCESS_TOKEN;
 
   if (!cmd.startsWith('/')) return;
 
-  const state = await loadGame(env.GAMES_KV, groupId);
+  const state = await store.load(groupId);
 
   // Use cached name from state to avoid an extra LINE API call on every command
   const knownPlayer =
@@ -458,7 +551,7 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
           await registerGroupMember(env.GAMES_KV, groupId, s.userId);
         }
       }
-      await env.GAMES_KV.delete(groupId);
+      await store.remove();
       await sendResult(token, replyToken, result);
       return;
     }
@@ -472,7 +565,7 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
           await registerGroupMember(env.GAMES_KV, groupId, s.userId);
         }
       }
-      await env.GAMES_KV.delete(groupId);
+      await store.remove();
       await sendResult(token, replyToken, result);
       return;
     }
@@ -536,7 +629,11 @@ async function handleEvent(event: LineEvent, env: Env): Promise<void> {
     replyText = result.groupMsg;
   }
 
-  await saveGame(env.GAMES_KV, state);
+  // Only persist when a state-mutating command succeeded — read-only commands
+  // (/status, /showcard, /help, …) and failed actions leave state untouched.
+  if (result?.ok && MUTATING_COMMANDS.has(cmd)) {
+    await store.save(state);
+  }
   const finalResult = result ?? { ok: true, groupMsg: replyText, privateMessages: {} };
   await sendResult(token, replyToken, finalResult, state);
 }
