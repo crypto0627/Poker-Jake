@@ -16,6 +16,7 @@ import {
   getStatus,
   getHoleCardsMessage,
   forceFold,
+  forceCheck,
   TURN_TIMEOUT_MS,
   STARTING_CHIPS,
   SMALL_BLIND,
@@ -734,6 +735,69 @@ section('12. forceFold folds idle current actor only on request after timeout');
     !forceFold(g2, otherRequester.userId, g2.turnStartedAt + TURN_TIMEOUT_MS - 1).ok,
     'Clock restarts for the next actor after an action'
   );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST 12b – forceCheck (/forcecheck after idle timeout)
+// ═══════════════════════════════════════════════════════════════════════════════
+section('12b. forceCheck checks idle actor only after timeout and when nothing to call');
+
+{
+  const g = newGame('g12c');
+  addPlayer(g, 'u1', 'Alice');
+  addPlayer(g, 'u2', 'Bob');
+  addPlayer(g, 'u3', 'Carol');
+  startGame(g, 'u1');
+
+  // Preflop first actor faces the big blind → force check not allowed
+  const pre = g.players[g.currentIdx];
+  const preOther = g.players.find((p) => p.userId !== pre.userId)!;
+  const facing = forceCheck(g, preOther.userId, g.turnStartedAt + TURN_TIMEOUT_MS);
+  assert(!facing.ok, 'Force check rejected when actor must call');
+  assertContains(facing.groupMsg, '/forcefold', 'Rejection points to /forcefold');
+  assert(!pre.hasActed && !pre.folded, 'Actor untouched after rejected force check');
+
+  // Everyone calls / checks to reach the flop (currentBet = 0)
+  while (g.phase === 'preflop') {
+    const cur = g.players[g.currentIdx];
+    processAction(g, cur.userId, g.currentBet > cur.currentBet ? 'call' : 'check');
+  }
+  assert(g.phase === 'flop' && g.currentBet === 0, 'Reached flop with no bet');
+
+  const actor = g.players[g.currentIdx];
+  const other = g.players.find((p) => p.userId !== actor.userId)!;
+  const potBefore = g.pot;
+  const chipsBefore = actor.chips;
+
+  const early = forceCheck(g, other.userId, g.turnStartedAt + TURN_TIMEOUT_MS - 1);
+  assert(!early.ok, 'Force check rejected before timeout');
+  assertContains(early.groupMsg, '尚未超時', 'Early rejection says not timed out');
+
+  const self = forceCheck(g, actor.userId, g.turnStartedAt + TURN_TIMEOUT_MS);
+  assert(!self.ok, 'Actor cannot force-check themselves');
+
+  const r = forceCheck(g, other.userId, g.turnStartedAt + TURN_TIMEOUT_MS);
+  assert(r.ok, 'Force check succeeds after timeout');
+  assertContains(r.groupMsg, '強制過牌', 'Message mentions 強制過牌');
+  assert(r.mentions?.some((m) => m.userId === actor.userId) === true, 'Checked player is @-mentioned');
+  assert(!actor.folded && actor.hasActed, 'Actor checked (not folded)');
+  assert(actor.chips === chipsBefore && g.pot === potBefore, 'No chips moved by force check');
+  assert(g.players[g.currentIdx].userId !== actor.userId, 'Turn advanced to next player');
+
+  // Remaining players force-checked / check → street completes and advances
+  const t = g.turnStartedAt + TURN_TIMEOUT_MS;
+  while (g.phase === 'flop') {
+    const cur = g.players[g.currentIdx];
+    const req = g.players.find((p) => p.userId !== cur.userId)!;
+    assert(forceCheck(g, req.userId, t * 2).ok, `Force check ${cur.name} on flop`);
+  }
+  assert(g.phase === 'turn', 'All force checks advance flop → turn');
+
+  // Not available outside betting phases
+  const g2 = newGame('g12d');
+  addPlayer(g2, 'u1', 'Alice');
+  addPlayer(g2, 'u2', 'Bob');
+  assert(!forceCheck(g2, 'u1', Date.now() + TURN_TIMEOUT_MS).ok, 'No force check while waiting');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -45,6 +45,7 @@ import {
   buyIn,
   showCards,
   forceFold,
+  forceCheck,
   ActionResult,
   STARTING_CHIPS,
   BIG_BLIND,
@@ -310,6 +311,7 @@ function buildHelpText(liffUrl: string): string {
   /allin 或  全押        — 全押
   /buyin 或  加倉 [金額]  — 加倉（上限 $${STARTING_CHIPS}，下一局生效）
   /forcefold 或 強制棄牌 — 當前玩家超過 2 分鐘未行動時，其他人可強制他棄牌
+  /forcecheck 或 強制過牌 — 當前玩家超過 2 分鐘未行動且不需跟注時，其他人可強制他過牌
 
 【其他】
   /next     或 下一局  — 下一局
@@ -332,7 +334,7 @@ ${liffUrl}
 const ALIASES: Record<string, string> = {
   '加入': '/join', '離開': '/leave', '開始': '/start',
   '跟注': '/call', '過牌': '/check', '棄牌': '/fold',
-  '加注': '/raise', '全押': '/allin', '加倉': '/buyin', '強制棄牌': '/forcefold',
+  '加注': '/raise', '全押': '/allin', '加倉': '/buyin', '強制棄牌': '/forcefold', '強制過牌': '/forcecheck',
   '下一局': '/next', '結束': '/endgame', '強制結束': '/forceend', '狀態': '/status', '連結': '/link',
   '手牌': '/cards', '帳戶': '/balance', '我的帳戶': '/balance',
   '排行榜': '/rank', '幫助': '/help', '亮牌': '/showcard',
@@ -341,7 +343,7 @@ const ALIASES: Record<string, string> = {
 // Commands that change GameState and therefore need saving on success.
 const MUTATING_COMMANDS = new Set([
   '/join', '/leave', '/start', '/call', '/check', '/fold', '/raise',
-  '/allin', '/forcefold', '/buyin', '/next',
+  '/allin', '/forcefold', '/forcecheck', '/buyin', '/next',
 ]);
 
 // ── Main fetch handler ────────────────────────────────────────────────────────
@@ -524,6 +526,10 @@ async function handleEvent(event: LineEvent, env: Env, store: GameStore | null):
       result = forceFold(state, userId);
       break;
 
+    case '/forcecheck':
+      result = forceCheck(state, userId);
+      break;
+
     case '/buyin': {
       const amt = parseInt(args[0] ?? '', 10) || STARTING_CHIPS;
       result = buyIn(state, userId, amt);
@@ -696,6 +702,10 @@ function buildActionQuickReply(state: GameState): QuickReplyItem[] | undefined {
     items.push({ label: '🃏 棄牌', text: '/fold' });
   }
   items.push({ label: '🃏 亮牌', text: '/showcard' });
+  // Force-check is only legal when the idle actor owes nothing
+  if (toCall <= 0) {
+    items.push({ label: '⏰ 強制過牌', text: '/forcecheck' });
+  }
   items.push({ label: '⏰ 強制棄牌', text: '/forcefold' });
   items.push({ label: '🙋 加入下局', text: '/join' });
 

@@ -684,26 +684,43 @@ export function processAction(
   return afterAction(state, actionMsg);
 }
 
-// ── Turn timeout (/forcefold) ─────────────────────────────────────────────────
+// ── Turn timeout (/forcefold, /forcecheck) ─────────────────────────────────────────────────
 
 /**
  * Folds the current actor on request from ANOTHER player, allowed only after
  * the actor has been idle past TURN_TIMEOUT_MS. The timeout alone never folds
  * anyone — someone must issue /forcefold.
  */
-export function forceFold(state: GameState, requesterId: string, now = Date.now()): ActionResult {
+/**
+ * Shared checks for /forcefold and /forcecheck: there must be an idle current
+ * actor, the requester must be someone else, and TURN_TIMEOUT_MS must have
+ * elapsed. Returns the idle player, or a failure result.
+ */
+function idleActorForForce(
+  state: GameState,
+  requesterId: string,
+  now: number,
+  actionLabel: string,
+  selfMsg: string
+): PlayerState | ActionResult {
   if (['waiting', 'ended', 'showdown'].includes(state.phase)) {
     return fail('目前沒有進行中的下注回合！');
   }
   const player = state.players[state.currentIdx];
   if (!player || player.folded || player.allIn) return fail('目前沒有等待行動的玩家！');
-  if (player.userId === requesterId) return fail('要棄自己的牌請用 /fold！');
+  if (player.userId === requesterId) return fail(selfMsg);
   if (!state.turnStartedAt || now - state.turnStartedAt < TURN_TIMEOUT_MS) {
     const remainSec = Math.max(0, Math.ceil((state.turnStartedAt + TURN_TIMEOUT_MS - now) / 1000));
     const m = Math.floor(remainSec / 60);
     const s = remainSec % 60;
-    return fail(`${player.name} 尚未超時，還要等 ${m} 分 ${s} 秒才能強制棄牌！`);
+    return fail(`${player.name} 尚未超時，還要等 ${m} 分 ${s} 秒才能強制${actionLabel}！`);
   }
+  return player;
+}
+
+export function forceFold(state: GameState, requesterId: string, now = Date.now()): ActionResult {
+  const player = idleActorForForce(state, requesterId, now, '棄牌', '要棄自己的牌請用 /fold！');
+  if ('ok' in player) return player;
 
   player.folded = true;
   player.hasActed = true;
@@ -711,6 +728,30 @@ export function forceFold(state: GameState, requesterId: string, now = Date.now(
   const result = afterAction(
     state,
     `@${player.name} 超過 ${TURN_TIMEOUT_MS / 60_000} 分鐘未行動，被強制棄牌`
+  );
+  result.mentions = [{ userId: player.userId, name: player.name }];
+  return result;
+}
+
+/**
+ * Checks for the idle current actor on request from ANOTHER player, after
+ * TURN_TIMEOUT_MS. Only allowed when the actor owes nothing (toCall = 0);
+ * facing a bet, a check isn't legal, so /forcefold must be used instead.
+ */
+export function forceCheck(state: GameState, requesterId: string, now = Date.now()): ActionResult {
+  const player = idleActorForForce(state, requesterId, now, '過牌', '要過牌請直接用 /check！');
+  if ('ok' in player) return player;
+
+  const toCall = state.currentBet - player.currentBet;
+  if (toCall > 0) {
+    return fail(`${player.name} 需跟注 $${toCall}，不能強制過牌，請用 /forcefold 強制棄牌！`);
+  }
+
+  player.hasActed = true;
+  state.turnStartedAt = now;
+  const result = afterAction(
+    state,
+    `@${player.name} 超過 ${TURN_TIMEOUT_MS / 60_000} 分鐘未行動，被強制過牌`
   );
   result.mentions = [{ userId: player.userId, name: player.name }];
   return result;
